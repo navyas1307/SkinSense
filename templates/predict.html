@@ -1,0 +1,72 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="card mt-4">
+        <div class="card-header">
+            <h2>Skin Cancer Detection</h2>
+        </div>
+        <div class="card-body">
+            {% if not ml_enabled %}
+            <div class="alert alert-warning">
+                <p>Skin cancer detection model is currently unavailable.</p>
+            </div>
+            {% endif %}
+
+            <form action="{{ url_for('cancer_predict') }}" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="file">Upload Skin Image</label>
+                    <input type="file" class="form-control-file" id="file" name="file" accept=".jpg,.jpeg,.png" required>
+                </div>
+                <button type="submit" class="btn btn-primary" {% if not ml_enabled %}disabled{% endif %}>
+                    Predict Skin Cancer
+                </button>
+            </form>
+
+            {% if label is defined %}
+            <div class="mt-4">
+                <h3>Prediction Results</h3>
+                <div class="card {% if label == 'Cancer' %}border-danger{% else %}border-success{% endif %}">
+                    <div class="card-body">
+                        <h4 class="card-title {% if label == 'Cancer' %}text-danger{% else %}text-success{% endif %}">
+                            {{ label }} Prediction
+                        </h4>
+                        <p class="card-text">
+                            <strong>Probability:</strong> {{ "%.2f"|format(probability * 100) }}%
+                        </p>
+                    </div>
+                </div>
+                
+                
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3>About Skin Cancer Detection</h3>
+        </div>
+        <div class="card-body">
+            <p>This AI-powered tool helps analyze skin images for potential signs of skin cancer. 
+               However, it is NOT a substitute for professional medical advice. 
+               Always consult with a healthcare professional for accurate diagnosis.</p>
+            
+            <h5>Classification Threshold:</h5>
+            <p>Our model uses an optimal threshold of 0.7452 for classification:</p>
+            <ul>
+                <li><strong>If the probability is ≥ 0.7452 → Classified as "Cancer"</strong></li>
+                <li><strong>If the probability is < 0.7452 → Classified as "Non-Cancer"</strong></li>
+            </ul>
+            
+            <h5>Important Notes:</h5>
+            <ul>
+                <li>The model predicts based on trained image data</li>
+                <li>Results should be interpreted with caution</li>
+                <li>Regular skin check-ups are crucial</li>
+                <li>Professional medical consultation is recommended</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

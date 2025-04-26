@@ -1,0 +1,195 @@
+{% extends "layout.html" %}
+
+{% block title %}Skin Remedies - SkinSense{% endblock %}
+
+{% block extra_css %}
+<style>
+    .remedy-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border: none;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        height: 100%;
+    }
+    
+    .remedy-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.1);
+    }
+    
+    .remedy-icon {
+        font-size: 2.5rem;
+        color: var(--dark-pink);
+        margin-bottom: 1rem;
+    }
+    
+    .remedy-card .card-body {
+        padding: 1.8rem;
+    }
+    
+    .remedy-card .btn-view {
+        background-color: white;
+        color: var(--dark-pink);
+        border: 2px solid var(--dark-pink);
+        transition: all 0.3s;
+        font-weight: 500;
+        padding: 0.5rem 1.2rem;
+        border-radius: 50px;
+    }
+    
+    .remedy-card .btn-view:hover {
+        background-color: var(--dark-pink);
+        color: white;
+    }
+    
+    .card-title {
+        color: var(--text-dark);
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    
+    .section-header {
+        position: relative;
+        margin-bottom: 3rem;
+    }
+    
+    .section-header:after {
+        content: '';
+        position: absolute;
+        width: 80px;
+        height: 3px;
+        background-color: var(--dark-pink);
+        bottom: -15px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+    
+    .condition-badge {
+        position: absolute;
+        top: 0;
+        right: 0;
+        background-color: var(--secondary-pink);
+        color: var(--text-dark);
+        padding: 0.3rem 0.8rem;
+        border-radius: 0 12px 0 12px;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="text-center section-header">
+        <!-- Added missing title -->
+        <h2 class="display-5">Natural Skin Remedies</h2>
+        <p class="lead text-muted">Discover effective solutions for common skin conditions and concerns using natural ingredients</p>
+    </div>
+    
+    <div class="row g-4 mt-4">
+        {% for condition, info in conditions.items() %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card remedy-card">
+                <div class="card-body position-relative">
+                    <!-- Added default category to prevent errors -->
+                    <span class="condition-badge">{{ info.get('category', 'Skin Care') }}</span>
+                    
+                    <div class="remedy-icon">
+                        {% if condition == 'acne' %}
+                            <i class="fas fa-bacterium"></i>
+                        {% elif condition == 'dryness' %}
+                            <i class="fas fa-tint-slash"></i>
+                        {% elif condition == 'hyperpigmentation' %}
+                            <i class="fas fa-adjust"></i>
+                        {% elif condition == 'rosacea' %}
+                            <i class="fas fa-fire-alt"></i>
+                        {% elif condition == 'eczema' %}
+                            <i class="fas fa-allergies"></i>
+                        {% elif condition == 'psoriasis' %}
+                            <i class="fas fa-layer-group"></i>
+                        {% elif condition == 'melasma' %}
+                            <i class="fas fa-mask"></i>
+                        {% elif condition == 'fungal acne' %}
+                            <i class="fas fa-seedling"></i>
+                        {% elif condition == 'Contact Dermatitis' %}
+                            <i class="fas fa-hand-paper"></i>
+                        {% elif condition == 'Seborrheic Dermatitis' %}
+                            <i class="fas fa-snowflake"></i>
+                        {% elif condition == 'Perioral Dermatitis' %}
+                            <!-- Changed to standard Font Awesome icon -->
+                            <i class="fas fa-smile"></i>
+                        {% elif condition == 'Keratosis Pilaris' %}
+                            <!-- Changed to standard Font Awesome icon -->
+                            <i class="fas fa-dot-circle"></i>
+                        {% elif condition == 'sunburn' %}
+                            <i class="fas fa-sun"></i>
+                        {% elif condition == 'aging' %}
+                            <i class="fas fa-hourglass-half"></i>
+                        {% else %}
+                            <i class="fas fa-spa"></i>
+                        {% endif %}
+                    </div>
+                    
+                    <h3 class="card-title text-capitalize">{{ condition }}</h3>
+                    <p class="card-text mb-4">{{ info.description }}</p>
+                    
+                    <div class="mt-auto">
+                        <a href="{{ url_for('condition_detail', condition=condition) }}" 
+                           class="btn btn-view">
+                            <i class="fas fa-arrow-right me-1"></i> View Remedies
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card p-4 shadow-sm border-0" style="background-color: var(--light-pink);">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h4 class="mb-2">Can't find what you're looking for?</h4>
+                            <p class="mb-md-0">Take our skin quiz to receive personalized recommendations for your unique skin type.</p>
+                        </div>
+                        <div class="col-md-4 text-md-end">
+                            <a href="{{ url_for('skin_quiz') }}" class="btn btn-view">
+                                <i class="fas fa-question-circle me-1"></i> Take Skin Quiz
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Add any JavaScript functionality you might need
+    document.addEventListener('DOMContentLoaded', function() {
+        // Animation for cards when they come into view
+        const cards = document.querySelectorAll('.remedy-card');
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = 1;
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, { threshold: 0.1 });
+        
+        cards.forEach(card => {
+            card.style.opacity = 0;
+            card.style.transform = 'translateY(20px)';
+            card.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+            observer.observe(card);
+        });
+    });
+</script>
+{% endblock %}

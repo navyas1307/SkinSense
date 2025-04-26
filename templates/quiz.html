@@ -1,0 +1,123 @@
+{% extends "layout.html" %}
+
+{% block title %}Skin Type Quiz - SkinSense{% endblock %}
+
+{% block content %}
+<section>
+    <div class="container">
+        <h1 class="text-center mb-4">Discover Your Skin Type</h1>
+        <p class="text-center mb-5">Answer these simple questions to determine your skin type and get personalized recommendations.</p>
+        
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('quiz_result') }}">
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">1. How does your skin feel after cleansing?</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q1" id="q1_tight" value="tight" required>
+                                    <label class="form-check-label" for="q1_tight">Tight and dry</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q1" id="q1_oily" value="oily">
+                                    <label class="form-check-label" for="q1_oily">Still oily</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q1" id="q1_fine" value="fine">
+                                    <label class="form-check-label" for="q1_fine">Comfortable and fine</label>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">2. How would you describe your pores?</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q2" id="q2_large" value="large" required>
+                                    <label class="form-check-label" for="q2_large">Large and visible</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q2" id="q2_small" value="small">
+                                    <label class="form-check-label" for="q2_small">Small and not very visible</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q2" id="q2_mixed" value="mixed">
+                                    <label class="form-check-label" for="q2_mixed">Visible in T-zone but not on cheeks</label>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">3. Does your skin react to new products?</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q3" id="q3_often" value="often" required>
+                                    <label class="form-check-label" for="q3_often">Often gets red or irritated</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q3" id="q3_sometimes" value="sometimes">
+                                    <label class="form-check-label" for="q3_sometimes">Sometimes has a reaction</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q3" id="q3_rarely" value="rarely">
+                                    <label class="form-check-label" for="q3_rarely">Rarely has any reaction</label>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">4. By mid-day, your skin looks:</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q4" id="q4_shiny" value="shiny" required>
+                                    <label class="form-check-label" for="q4_shiny">Shiny and oily</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q4" id="q4_flaky" value="flaky">
+                                    <label class="form-check-label" for="q4_flaky">Flaky or dry in some areas</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q4" id="q4_both" value="both">
+                                    <label class="form-check-label" for="q4_both">Oily in T-zone, normal/dry elsewhere</label>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">5. Where do you typically get breakouts?</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q5" id="q5_tzone" value="tzone" required>
+                                    <label class="form-check-label" for="q5_tzone">Mainly in the T-zone</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q5" id="q5_all" value="all">
+                                    <label class="form-check-label" for="q5_all">All over the face</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="q5" id="q5_none" value="none">
+                                    <label class="form-check-label" for="q5_none">Rarely get breakouts</label>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary w-100 py-2">Get My Results</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Any additional CSS specific to the quiz page */
+    .form-check {
+        margin-bottom: 0.5rem;
+    }
+    
+    .btn-primary {
+        background-color: var(--dark-pink);
+        border-color: var(--dark-pink);
+    }
+    
+    .btn-primary:hover {
+        background-color: var(--accent-pink);
+        border-color: var(--accent-pink);
+    }
+</style>
+{% endblock %}

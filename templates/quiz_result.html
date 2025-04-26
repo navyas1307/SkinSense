@@ -1,0 +1,107 @@
+{% extends "layout.html" %}
+
+{% block title %}Quiz Results - SkinSense{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.0/font/bootstrap-icons.css">
+<style>
+    /* Additional styling for quiz result page */
+    .badge.bg-primary {
+        background-color: var(--dark-pink) !important;
+    }
+    
+    .btn-primary {
+        background-color: var(--dark-pink);
+        border-color: var(--dark-pink);
+    }
+    
+    .btn-primary:hover {
+        background-color: var(--accent-pink);
+        border-color: var(--accent-pink);
+    }
+    
+    .btn-outline-primary {
+        color: var(--dark-pink);
+        border-color: var(--dark-pink);
+    }
+    
+    .btn-outline-primary:hover {
+        background-color: var(--dark-pink);
+        border-color: var(--dark-pink);
+    }
+    
+    .card-header {
+        background-color: var(--light-pink) !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<section>
+    <div class="container">
+        <div class="text-center mb-5">
+            <h1 class="display-5 mb-3">Your Skin Type Results</h1>
+            <div class="badge bg-primary fs-5 py-2 px-3 text-capitalize">{{ skin_type }} Skin</div>
+        </div>
+        
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h3 class="mb-0">Characteristics</h3>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            {% for characteristic in info.characteristics %}
+                            <li class="list-group-item d-flex">
+                                <i class="bi bi-check-circle-fill text-success me-2"></i>
+                                {{ characteristic }}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="card mb-4">
+                    <div class="card-header bg-light">
+                        <h3 class="mb-0">Recommended Ingredients</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            {% for ingredient in info.ingredients %}
+                            <div class="col-md-6 mb-2">
+                                <div class="d-flex align-items-center">
+                                    <i class="bi bi-star-fill text-warning me-2"></i>
+                                    {{ ingredient }}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h3 class="mb-0">Ingredients to Avoid</h3>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            {% for item in info.avoid %}
+                            <li class="list-group-item d-flex">
+                                <i class="bi bi-x-circle-fill text-danger me-2"></i>
+                                {{ item }}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="text-center mt-4">
+                    <a href="{{ url_for('weather_recommendations') }}" class="btn btn-primary me-2">Get Weather Recommendations</a>
+                    <a href="{{ url_for('remedies') }}" class="btn btn-outline-primary">View Remedies</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

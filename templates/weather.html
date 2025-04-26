@@ -1,0 +1,249 @@
+{% extends "layout.html" %}
+
+{% block title %}Weather Recommendations - SkinSense{% endblock %}
+
+{% block extra_css %}
+<style>
+    .page-header {
+        background: linear-gradient(135deg, #FFF0F6, #FFDBEB);
+        padding: 3rem 0;
+        border-radius: 0 0 30px 30px;
+        margin-bottom: 2rem;
+        color: #333;
+        box-shadow: 0 2px 15px rgba(0, 0, 0, 0.05);
+    }
+    
+    .header-icon {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        color: var(--dark-pink);
+    }
+    
+    .btn-primary {
+        background-color: var(--text-dark);
+        border-color: var(--text-dark);
+    }
+    
+    .btn-primary:hover {
+        background-color: #000;
+        border-color: #000;
+    }
+    
+    .card {
+        border-radius: 10px;
+        overflow: hidden;
+        border: none;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+        transition: transform 0.3s, box-shadow 0.3s;
+        background-color: white;
+    }
+    
+    .card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 15px rgba(0, 0, 0, 0.08);
+    }
+    
+    .card-header {
+        background-color: var(--light-pink) !important;
+        border-bottom: none;
+        padding: 1rem 1.5rem;
+    }
+    
+    .card-header h3, .card-header h4 {
+        color: var(--text-dark);
+        font-weight: 600;
+    }
+    
+    .list-group-item {
+        border-left: none;
+        border-right: none;
+        padding: 1rem 1.5rem;
+        position: relative;
+    }
+    
+    .list-group-item:before {
+        content: '•';
+        color: var(--text-dark);
+        margin-right: 10px;
+        font-weight: bold;
+    }
+    
+    .weather-info-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 1.2rem;
+        margin-bottom: 1.5rem;
+        border-left: 3px solid var(--secondary-pink);
+    }
+    
+    .weather-icon {
+        font-size: 1.2rem;
+        color: var(--text-dark);
+        margin-right: 10px;
+    }
+    
+    .routine-title {
+        display: flex;
+        align-items: center;
+    }
+    
+    .routine-icon {
+        background-color: var(--text-dark);
+        color: white;
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        margin-right: 15px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Weather Form Section -->
+<section class="py-4">
+    <div class="container">
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>{{ error }}
+        </div>
+        {% endif %}
+        
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body p-4">
+                        <h4 class="card-title text-center mb-4"><i class="fas fa-map-marker-alt me-2" style="color: var(--dark-pink);"></i>Enter Your Location</h4>
+                        <form method="POST" action="{{ url_for('weather_recommendations') }}">
+                            <div class="mb-3">
+                                <label for="city" class="form-label">City Name</label>
+                                <input type="text" class="form-control form-control-lg" id="city" name="city" required placeholder="e.g. New York, London, Tokyo">
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-lg w-100">
+                                <i class="fas fa-search me-2"></i>Get Recommendations
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        {% if recommendation %}
+        <div class="mt-5">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title mb-0">
+                        <i class="fas fa-star me-2"></i>Recommendations for {{ city }}
+                    </h3>
+                </div>
+                <div class="card-body p-4">
+                    <div class="row mb-4">
+                        <div class="col-md-4">
+                            <div class="weather-info-card">
+                                <p class="mb-0"><i class="fas fa-temperature-high weather-icon"></i><strong>Temperature:</strong> {{ temperature }}°C</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="weather-info-card">
+                                <p class="mb-0"><i class="fas fa-tint weather-icon"></i><strong>Humidity:</strong> {{ humidity }}%</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="weather-info-card">
+                                <p class="mb-0"><i class="fas fa-cloud weather-icon"></i><strong>Weather:</strong> {{ weather_condition }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h4 class="card-title mb-0 routine-title">
+                                        <div class="routine-icon">
+                                            <i class="fas fa-sun"></i>
+                                        </div>
+                                        Morning Routine
+                                    </h4>
+                                </div>
+                                <div class="card-body">
+                                    <ol class="list-group list-group-flush">
+                                        {% for item in recommendation.morning %}
+                                        <li class="list-group-item">{{ item }}</li>
+                                        {% endfor %}
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h4 class="card-title mb-0 routine-title">
+                                        <div class="routine-icon">
+                                            <i class="fas fa-moon"></i>
+                                        </div>
+                                        Evening Routine
+                                    </h4>
+                                </div>
+                                <div class="card-body">
+                                    <ol class="list-group list-group-flush">
+                                        {% for item in recommendation.evening %}
+                                        <li class="list-group-item">{{ item }}</li>
+                                        {% endfor %}
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</section>
+
+<!-- Skincare Tips Section -->
+{% if not recommendation %}
+<section class="py-4">
+    <div class="container">
+        <h3 class="text-center mb-4" style="color: #222222;">
+            <i class="fas fa-lightbulb me-2"></i>Skincare Tips While You Wait
+        </h3>
+        <div class="row">
+            <div class="col-md-4 mb-4">
+                <div class="card h-100" style="background-color: white;">
+                    <div class="card-header" style="background-color: white !important;">
+                        <h5 class="mb-0" style="color: #222222;"><i class="fas fa-sun me-2" style="color: #222222;"></i>Sun Protection</h5>
+                    </div>
+                    <div class="card-body">
+                        <p style="color: #222222;">Always wear SPF 30+ sunscreen daily, even on cloudy days. Reapply every 2 hours when outdoors for extended periods.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100" style="background-color: white;">
+                    <div class="card-header" style="background-color: white !important;">
+                        <h5 class="mb-0" style="color: #222222;"><i class="fas fa-tint me-2" style="color: #222222;"></i>Hydration</h5>
+                    </div>
+                    <div class="card-body">
+                        <p style="color: #222222;">Drink plenty of water and use a hydrating serum with hyaluronic acid to keep your skin plump and moisturized.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100" style="background-color: white;">
+                    <div class="card-header" style="background-color: white !important;">
+                        <h5 class="mb-0" style="color: #222222;"><i class="fas fa-wind me-2" style="color: #222222;"></i>Weather Changes</h5>
+                    </div>
+                    <div class="card-body">
+                        <p style="color: #222222;">Adjust your skincare routine with the seasons. Use lighter products in humid weather and richer moisturizers in dry, cold conditions.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endif %}
+{% endblock %}

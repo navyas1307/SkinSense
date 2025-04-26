@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SkinSense{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        :root {
+            --primary-pink: #FFB6C1;
+            --secondary-pink: #FFD1DC;
+            --light-pink: #FFF0F5;
+            --light-soft-pink: #FFF5F8;
+            --dark-pink: #DB7093;
+            --accent-pink: #FF82AB;
+            --text-dark: #222222;
+            --text-medium: #444444;
+            --text-light: #666666;
+        }
+        
+        body {
+            background-color: var(--light-soft-pink);
+            font-family: 'Poppins', sans-serif;
+            color: var(--text-dark);
+        }
+        
+        .navbar {
+            background-color: white !important;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .navbar-brand {
+            font-weight: 700;
+        }
+        
+        .brand-name {
+            color: var(--text-dark);
+            font-size: 1.5rem;
+        }
+        
+        .nav-link {
+            color: var(--text-dark) !important;
+            font-weight: 500;
+            position: relative;
+        }
+        
+        .nav-link:after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 2px;
+            bottom: 0;
+            left: 0;
+            background-color: var(--dark-pink);
+            transition: width 0.3s;
+        }
+        
+        .nav-link:hover:after, .nav-link.active:after {
+            width: 100%;
+        }
+        
+        .nav-link.active {
+            color: var(--text-dark) !important;
+            font-weight: 600;
+        }
+        
+        .footer {
+            background-color: var(--text-dark);
+            color: white;
+        }
+        
+        .footer a {
+            color: var(--secondary-pink) !important;
+        }
+        
+        .footer a:hover {
+            color: white !important;
+        }
+        
+        .watermark {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            opacity: 0.03;
+            pointer-events: none;
+            z-index: -1;
+        }
+        
+        .watermark img {
+            width: 200px;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Watermark -->
+    <div class="watermark">
+        <i class="fas fa-spa fa-10x" style="color: var(--primary-pink);"></i>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('index') }}">
+                <i class="fas fa-spa me-2" style="color: var(--text-dark);"></i>
+                <span class="brand-name">SkinSense</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                            <i class="fas fa-home me-1"></i> Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'weather_recommendations' %}active{% endif %}" href="{{ url_for('weather_recommendations') }}">
+                            <i class="fas fa-cloud-sun me-1"></i> Weather
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'skin_quiz' %}active{% endif %}" href="{{ url_for('skin_quiz') }}">
+                            <i class="fas fa-question-circle me-1"></i> Skin Quiz
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'remedies' %}active{% endif %}" href="{{ url_for('remedies') }}">
+                            <i class="fas fa-mortar-pestle me-1"></i> Remedies
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'cancer_predict' %}active{% endif %}" href="{{ url_for('cancer_predict') }}">
+                            <i class="fas fa-heartbeat me-1"></i> Cancer Detection
+                        </a>
+                    </li>
+                </ul>
+                {% if session.get('skin_type') %}
+                <div class="ms-2">
+                    <span class="badge bg-light text-dark py-2 px-3">
+                        <i class="fas fa-user me-1"></i> Skin Type: {{ session.get('skin_type')|capitalize }}
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    <div class="container mt-3">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category if category != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Content -->
+    <div class="container py-4">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer py-4 mt-5">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <p class="mb-0">
+                        <i class="fas fa-spa me-2" style="color: var(--dark-pink);"></i>
+                        &copy; 2025 SkinSense. All rights reserved.
+                    </p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <a href="#" class="text-decoration-none me-3">
+                        <i class="fab fa-facebook-f"></i>
+                    </a>
+                    <a href="#" class="text-decoration-none me-3">
+                        <i class="fab fa-instagram"></i>
+                    </a>
+                    <a href="#" class="text-decoration-none">
+                        <i class="fab fa-twitter"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
