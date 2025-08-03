@@ -17,7 +17,7 @@ SkinSense is a full-stack web application that provides smart, personalized skin
   - Provides **context-aware** skincare tips based on temperature, humidity, and UV index using **Generative AI prompts**.
 
 - **AI Skincare Assistant (GenAI)**
-  - Generates personalized skincare advice using Generative AI (ChatGPT API or local Ollama models).
+  - Generates personalized skincare advice using Generative AI (local Ollama models).
   - Avoids hardcoded logic; outputs change dynamically based on user input and weather conditions.
 
 - **Personalized Product Recommendations**
@@ -39,7 +39,7 @@ SkinSense is a full-stack web application that provides smart, personalized skin
 - Python (Flask)
 - TensorFlow / Keras (MobileNetV2 Model)
 - OpenWeatherMap API
-- Generative AI API (OpenAI ChatGPT / Ollama)
+- Generative AI API (Ollama)
 
 ---
 
