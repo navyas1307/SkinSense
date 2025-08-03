@@ -47,10 +47,10 @@ SkinSense is a full-stack web application that provides smart, personalized skin
 - Weather Recommendations(Using Gen-AI)
 - <img width="500" height="500" alt="Screenshot (167)" src="https://github.com/user-attachments/assets/0b5b5948-f723-4d5a-b743-0e58875f5ed4" />
 
-<img width="500" height="500" alt="Screenshot (168)" src="https://github.com/user-attachments/assets/0489a1b1-11b4-4941-af1d-4b77226bde19" />
+-<img width="500" height="500" alt="Screenshot (168)" src="https://github.com/user-attachments/assets/0489a1b1-11b4-4941-af1d-4b77226bde19" />
 
 - Skin-Cancer Prediction
-<img width="500" height="500" alt="Screenshot (169)" src="https://github.com/user-attachments/assets/578e8672-1ee6-44eb-b60b-d4036cbe6153" />
+-<img width="500" height="500" alt="Screenshot (169)" src="https://github.com/user-attachments/assets/578e8672-1ee6-44eb-b60b-d4036cbe6153" />
 
 ---
 
