@@ -43,7 +43,7 @@ SkinSense is a full-stack web application that provides smart, personalized skin
 
 ---
 
-## Screenshots (Optional)
+## Screenshots 
 - Weather Recommendations(Using Gen-AI)
 - <img width="500" height="500" alt="Screenshot (167)" src="https://github.com/user-attachments/assets/0b5b5948-f723-4d5a-b743-0e58875f5ed4" />
 
