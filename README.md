@@ -12,7 +12,7 @@ SkinSense is a full-stack web application that provides smart, personalized skin
   - Detects potential skin issues using a fine-tuned MobileNetV2 deep learning model (5-fold cross-validation, early stopping; 84% precision, 86% recall).
   - Real-time inference powered by Flask API.
 
-- ** Dynamic Weather-Based Skincare Suggestions (GenAI)**
+- **Dynamic Weather-Based Skincare Suggestions (GenAI)**
   - Fetches real-time weather data via the OpenWeatherMap API.
   - Provides **context-aware** skincare tips based on temperature, humidity, and UV index using **Generative AI prompts**.
 
@@ -45,7 +45,8 @@ SkinSense is a full-stack web application that provides smart, personalized skin
 
 ## Screenshots (Optional)
 
-_Add screenshots of the UI, prediction results, and AI recommendations here._
+_<img width="1920" height="1200" alt="Screenshot (167)" src="https://github.com/user-attachments/assets/d1147405-4870-45fe-a065-ab8c034c8781" />
+_
 
 ---
 
