@@ -53,4 +53,7 @@ wheel==0.45.1
 wrapt==1.17.3
 gunicorn
 requests
+python-dotenv
+
+
 
