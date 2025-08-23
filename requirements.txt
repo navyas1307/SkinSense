@@ -54,6 +54,9 @@ wrapt==1.17.3
 gunicorn
 requests
 python-dotenv
+langchain-community
+
+
 
 
 
