@@ -958,5 +958,8 @@ if __name__ == '__main__':
         print(f"   - Health: {'✅ Healthy' if check_ollama_health() else '❌ Not responding'}")
     print(f"🔬 ML Model: {'✅ Loaded' if ML_ENABLED else '❌ Not available'}")
     print("=" * 50)
-    
-    app.run(debug=True, host='0.0.0.0', port=5000)
+
+    import os
+    port = int(os.environ.get("PORT", 5000))  # ✅ Render gives you a dynamic port
+    app.run(debug=False, host='0.0.0.0', port=port)
+
