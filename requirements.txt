@@ -23,12 +23,12 @@ MarkupSafe==3.0.2
 mdurl==0.1.2
 ml-dtypes==0.5.3
 namex==0.1.0
-numpy==1.26.4
+numpy>=1.26.4
 opencv-python==4.12.0.88
 opt_einsum==3.4.0
 optree==0.17.0
 packaging==25.0
-pandas==2.2.3
+pandas>=2.2.2
 pillow==11.3.0
 protobuf==6.32.0
 Pygments==2.19.2
