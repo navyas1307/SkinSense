@@ -16,9 +16,10 @@ import numpy as np
 from keras.models import load_model
 import time
 from dotenv import load_dotenv
+import gdown
 
 # LangChain and Ollama imports
-from langchain_community.llms import Ollama  # This is the correct import
+from langchain_community.llms import Ollama  # Correct import syntax
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.chains import LLMChain
@@ -41,6 +42,9 @@ OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '2f021261bac8c9f5f35de84b
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3')  # or 'llama2', 'mistral', 'codellama', etc.
 
+# ML Model Configuration
+skin_cancer_model = None
+ML_ENABLED = False
 SKIN_CANCER_MODEL_PATH = 'skin_cancer_model.h5'
 SKIN_CANCER_IMG_SIZE = (224, 224)
 
@@ -80,6 +84,76 @@ def inject_datetime():
         'now': datetime.now(),
         'datetime': datetime
     }
+
+# ML Model Functions
+def download_model_from_gdrive(file_id, output_path):
+    """Download model from Google Drive"""
+    try:
+        print(f"🔄 Downloading model from Google Drive (ID: {file_id})...")
+        url = f"https://drive.google.com/uc?id={file_id}"
+        gdown.download(url, output_path, quiet=False)
+        
+        # Verify file exists and has reasonable size
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path) / (1024 * 1024)  # Size in MB
+            print(f"✅ Model downloaded successfully ({file_size:.1f} MB)")
+            return True
+        else:
+            print("❌ Downloaded file not found")
+            return False
+    except Exception as e:
+        print(f"❌ Failed to download from Google Drive: {str(e)}")
+        return False
+
+def load_skin_cancer_model():
+    """Load skin cancer model with automatic download from Google Drive"""
+    global skin_cancer_model, ML_ENABLED
+    
+    # Try to load existing model first
+    if os.path.exists(SKIN_CANCER_MODEL_PATH):
+        try:
+            print("🔄 Loading existing model...")
+            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
+            ML_ENABLED = True
+            file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024 * 1024)
+            print(f"✅ Skin cancer model loaded successfully from local file ({file_size:.1f} MB)")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to load existing model: {str(e)}")
+            # Remove corrupted file
+            try:
+                os.remove(SKIN_CANCER_MODEL_PATH)
+                print("🗑️ Removed corrupted model file")
+            except:
+                pass
+    
+    # Get model file ID from environment variable or use default
+    model_gdrive_id = os.getenv('MODEL_GDRIVE_ID', '1Mt2Xvx--d04qxP-rrrfZcjAsj8RN_IPN')
+    
+    print(f"🎯 Attempting to download model from Google Drive...")
+    print(f"📁 File ID: {model_gdrive_id}")
+    
+    # Download from Google Drive
+    if download_model_from_gdrive(model_gdrive_id, SKIN_CANCER_MODEL_PATH):
+        try:
+            print("🔄 Loading downloaded model...")
+            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
+            ML_ENABLED = True
+            print("✅ Skin cancer model downloaded and loaded successfully!")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to load downloaded model: {str(e)}")
+            # Clean up bad download
+            try:
+                os.remove(SKIN_CANCER_MODEL_PATH)
+            except:
+                pass
+    
+    # If all methods fail
+    ML_ENABLED = False
+    skin_cancer_model = None
+    print("⚠️ Skin cancer model not available - ML features disabled")
+    return False
 
 # Skin types and their characteristics
 SKIN_TYPES = {
@@ -555,7 +629,7 @@ def get_enhanced_weather_data(city):
     url = f"https://api.openweathermap.org/data/2.5/weather?q={api_city}&appid={OPENWEATHER_API_KEY}&units=metric"
     
     try:
-        print(f"🌐 Making weather API request for: {api_city}")
+        print(f"🌍 Making weather API request for: {api_city}")
         response = requests.get(url, timeout=10)
         
         print(f"📡 API Response status: {response.status_code}")
@@ -619,15 +693,6 @@ def preprocess_image_for_cancer_detection(img):
     img = np.expand_dims(img, axis=0)
     img = img / 255.0
     return img
-
-try:
-    # Load skin cancer detection model
-    skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
-    ML_ENABLED = True
-    print("✅ Skin cancer model loaded successfully")
-except:
-    ML_ENABLED = False
-    print("⚠️ Skin cancer model not found, ML features disabled")
 
 # Routes
 @app.route('/')
@@ -779,6 +844,10 @@ def condition_detail(condition):
 @app.route('/cancer-predict', methods=['GET', 'POST'])
 def cancer_predict():
     if request.method == 'POST':
+        if not ML_ENABLED:
+            flash('Skin cancer detection model is currently unavailable. Please try again later.')
+            return render_template('predict.html', ml_enabled=ML_ENABLED)
+            
         if 'file' not in request.files:
             flash('No file part')
             return redirect(request.url)
@@ -789,39 +858,47 @@ def cancer_predict():
             return redirect(request.url)
             
         if file and allowed_file(file.filename):
-            # Save the uploaded file
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            # Read and process the image
-            img_array = cv2.imread(filepath)
-            if img_array is None:
-                flash('Invalid image file')
-                return redirect(request.url)
-            
-            # Predict using skin cancer model
-            if ML_ENABLED:
-                try:
-                    processed_img = preprocess_image_for_cancer_detection(img_array)
-                    pred = skin_cancer_model.predict(processed_img)
-                    
-                    label = 'Cancer' if pred[0][0] > 0.7452 else 'Not Cancer'
-                    probability = float(pred[0][0])
-                    
-                    print(f"🔬 Skin cancer prediction: {label} (probability: {probability:.4f})")
-                    
-                    return render_template('predict.html', 
-                                           image_path=filepath, 
-                                           label=label, 
-                                           probability=probability,
-                                           ml_enabled=ML_ENABLED)
-                except Exception as e:
-                    print(f"❌ Error in skin cancer prediction: {str(e)}")
-                    flash('Error processing image for prediction')
+            try:
+                # Save the uploaded file
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                
+                # Read and process the image
+                img_array = cv2.imread(filepath)
+                if img_array is None:
+                    flash('Invalid image file. Please upload a valid JPG, PNG, or JPEG image.')
                     return redirect(request.url)
-            else:
-                flash('Skin cancer detection model is not available')
+                
+                # Predict using skin cancer model
+                processed_img = preprocess_image_for_cancer_detection(img_array)
+                pred = skin_cancer_model.predict(processed_img)
+                
+                # Calculate results
+                cancer_probability = float(pred[0][0])
+                is_cancer = cancer_probability > 0.7452
+                label = 'Cancer' if is_cancer else 'Not Cancer'
+                confidence = cancer_probability if is_cancer else (1 - cancer_probability)
+                
+                print(f"🔬 Skin cancer prediction: {label} (confidence: {confidence:.4f})")
+                
+                # Add disclaimer
+                disclaimer = """
+                IMPORTANT DISCLAIMER: This AI prediction is for educational purposes only and should NOT be used as a substitute for professional medical diagnosis. 
+                Please consult with a qualified dermatologist or healthcare provider for proper evaluation of any skin concerns.
+                """
+                
+                return render_template('predict.html', 
+                                       image_path=filepath, 
+                                       label=label, 
+                                       probability=cancer_probability,
+                                       confidence=confidence,
+                                       ml_enabled=ML_ENABLED,
+                                       disclaimer=disclaimer)
+                                       
+            except Exception as e:
+                print(f"❌ Error in skin cancer prediction: {str(e)}")
+                flash('Error processing image. Please try again with a different image.')
                 return redirect(request.url)
     
     return render_template('predict.html', ml_enabled=ML_ENABLED)
@@ -841,7 +918,7 @@ def api_recommendations():
         if not city:
             return jsonify({'error': 'City is required'}), 400
             
-        print(f"🌐 API request for city: {city}, skin_type: {skin_type}")
+        print(f"🌍 API request for city: {city}, skin_type: {skin_type}")
             
         weather_data = get_enhanced_weather_data(city)
         if not weather_data:
@@ -948,6 +1025,14 @@ def inject_user_info():
         'datetime': datetime
     }
 
+# Initialize model on startup
+print("🚀 Initializing Skin Cancer Detection Model...")
+try:
+    load_skin_cancer_model()
+except Exception as e:
+    ML_ENABLED = False
+    print(f"⚠️ Could not initialize skin cancer model: {str(e)}")
+
 if __name__ == '__main__':
     print("🚀 Starting SkinSense Application...")
     print(f"🔑 OpenWeather API: {'✅ Configured' if OPENWEATHER_API_KEY else '❌ Missing'}")
@@ -958,8 +1043,6 @@ if __name__ == '__main__':
         print(f"   - Health: {'✅ Healthy' if check_ollama_health() else '❌ Not responding'}")
     print(f"🔬 ML Model: {'✅ Loaded' if ML_ENABLED else '❌ Not available'}")
     print("=" * 50)
-
-    import os
-    port = int(os.environ.get("PORT", 5000))  # ✅ Render gives you a dynamic port
-    app.run(debug=False, host='0.0.0.0', port=port)
+    
+    app.run(debug=True, host='0.0.0.0', port=5000)
 
