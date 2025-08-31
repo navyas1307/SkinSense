@@ -54,3 +54,5 @@ wrapt==1.17.3
 gunicorn==23.0.0
 python-dotenv==1.0.1
 langchain-community
+gdown==4.7.1
+
