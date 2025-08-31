@@ -11,25 +11,18 @@ import cv2
 import pickle
 import tensorflow as tf
 import pandas as pd
-import cv2
 import numpy as np
 from keras.models import load_model
 import time
 from dotenv import load_dotenv
 import gdown
-
-# LangChain and Ollama imports
-from langchain_community.llms import Ollama  # Correct import syntax
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain.chains import LLMChain
 import re
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))
 
 # Configuration
 UPLOAD_FOLDER = 'static/uploads'
@@ -38,13 +31,7 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 # API Keys
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '2f021261bac8c9f5f35de84b6486589e')
 
-# Ollama Configuration
-OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama3')  # or 'llama2', 'mistral', 'codellama', etc.
-
-# ML Model Configuration
-skin_cancer_model = None
-ML_ENABLED = False
+# Model Configuration
 SKIN_CANCER_MODEL_PATH = 'skin_cancer_model.h5'
 SKIN_CANCER_IMG_SIZE = (224, 224)
 
@@ -52,23 +39,11 @@ SKIN_CANCER_IMG_SIZE = (224, 224)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Initialize Ollama LLM
-try:
-    llm = Ollama(  # Changed from OllamaLLM to Ollama
-        model=OLLAMA_MODEL,
-        base_url=OLLAMA_BASE_URL,
-        temperature=0.7,
-        top_p=0.9,
-        num_predict=500
-    )
-    OLLAMA_ENABLED = True
-    print(f"✅ Ollama initialized with model: {OLLAMA_MODEL}")
-except Exception as e:
-    OLLAMA_ENABLED = False
-    print(f"❌ Failed to initialize Ollama: {str(e)}")
-    print("Make sure Ollama is running with: ollama serve")
+# Disable Ollama for production deployment
+OLLAMA_ENABLED = False
+print("Ollama disabled for production deployment")
 
-# ADDED: Template filter for datetime formatting
+# Template filter for datetime formatting
 @app.template_filter('datetime')
 def datetime_filter(dt):
     """Format datetime for display"""
@@ -76,7 +51,7 @@ def datetime_filter(dt):
         dt = datetime.fromisoformat(dt)
     return dt.strftime('%b %d, %H:%M')
 
-# ADDED: Context processor to make datetime available in templates
+# Context processor to make datetime available in templates
 @app.context_processor
 def inject_datetime():
     """Make datetime available in all templates"""
@@ -84,76 +59,6 @@ def inject_datetime():
         'now': datetime.now(),
         'datetime': datetime
     }
-
-# ML Model Functions
-def download_model_from_gdrive(file_id, output_path):
-    """Download model from Google Drive"""
-    try:
-        print(f"🔄 Downloading model from Google Drive (ID: {file_id})...")
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, output_path, quiet=False)
-        
-        # Verify file exists and has reasonable size
-        if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path) / (1024 * 1024)  # Size in MB
-            print(f"✅ Model downloaded successfully ({file_size:.1f} MB)")
-            return True
-        else:
-            print("❌ Downloaded file not found")
-            return False
-    except Exception as e:
-        print(f"❌ Failed to download from Google Drive: {str(e)}")
-        return False
-
-def load_skin_cancer_model():
-    """Load skin cancer model with automatic download from Google Drive"""
-    global skin_cancer_model, ML_ENABLED
-    
-    # Try to load existing model first
-    if os.path.exists(SKIN_CANCER_MODEL_PATH):
-        try:
-            print("🔄 Loading existing model...")
-            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
-            ML_ENABLED = True
-            file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024 * 1024)
-            print(f"✅ Skin cancer model loaded successfully from local file ({file_size:.1f} MB)")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to load existing model: {str(e)}")
-            # Remove corrupted file
-            try:
-                os.remove(SKIN_CANCER_MODEL_PATH)
-                print("🗑️ Removed corrupted model file")
-            except:
-                pass
-    
-    # Get model file ID from environment variable or use default
-    model_gdrive_id = os.getenv('MODEL_GDRIVE_ID', '1Mt2Xvx--d04qxP-rrrfZcjAsj8RN_IPN')
-    
-    print(f"🎯 Attempting to download model from Google Drive...")
-    print(f"📁 File ID: {model_gdrive_id}")
-    
-    # Download from Google Drive
-    if download_model_from_gdrive(model_gdrive_id, SKIN_CANCER_MODEL_PATH):
-        try:
-            print("🔄 Loading downloaded model...")
-            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
-            ML_ENABLED = True
-            print("✅ Skin cancer model downloaded and loaded successfully!")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to load downloaded model: {str(e)}")
-            # Clean up bad download
-            try:
-                os.remove(SKIN_CANCER_MODEL_PATH)
-            except:
-                pass
-    
-    # If all methods fail
-    ML_ENABLED = False
-    skin_cancer_model = None
-    print("⚠️ Skin cancer model not available - ML features disabled")
-    return False
 
 # Skin types and their characteristics
 SKIN_TYPES = {
@@ -238,203 +143,9 @@ SKIN_CONDITIONS = {
     }
 }
 
-def check_ollama_health():
-    """Check if Ollama is running and responsive"""
-    try:
-        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        return response.status_code == 200
-    except:
-        return False
-
-def get_ollama_recommendations(weather_data, skin_type=None, skin_concerns=None):
-    """
-    Get skincare recommendations using Ollama and LangChain
-    """
-    if not OLLAMA_ENABLED or not check_ollama_health():
-        raise Exception("Ollama is not available or not running")
-    
-    # Extract weather data
-    temp = weather_data['main']['temp']
-    humidity = weather_data['main']['humidity']
-    weather_condition = weather_data['weather'][0]['description']
-    uv_index = weather_data.get('uvi', 5)
-    wind_speed = weather_data.get('wind', {}).get('speed', 0)
-    
-    # Create detailed prompt template
-    prompt_template = PromptTemplate(
-        input_variables=["temperature", "humidity", "weather_condition", "uv_index", "skin_type", "skin_concerns"],
-        template="""You are a professional dermatologist and skincare expert. Create a personalized skincare routine based on the following information:
-
-WEATHER CONDITIONS:
-- Temperature: {temperature}°C
-- Humidity: {humidity}%
-- Weather: {weather_condition}
-- UV Index: {uv_index}
-
-USER PROFILE:
-- Skin Type: {skin_type}
-- Skin Concerns: {skin_concerns}
-
-Please provide a detailed skincare routine with exactly 6 steps for morning and 6 steps for evening. 
-
-Format your response EXACTLY as follows:
-
-MORNING ROUTINE:
-1. [First morning step with specific product recommendations]
-2. [Second morning step with specific product recommendations]
-3. [Third morning step with specific product recommendations]
-4. [Fourth morning step with specific product recommendations]
-5. [Fifth morning step with specific product recommendations]
-6. [Sixth morning step with specific product recommendations]
-
-EVENING ROUTINE:
-1. [First evening step with specific product recommendations]
-2. [Second evening step with specific product recommendations]
-3. [Third evening step with specific product recommendations]
-4. [Fourth evening step with specific product recommendations]
-5. [Fifth evening step with specific product recommendations]
-6. [Sixth evening step with specific product recommendations]
-
-Consider the weather conditions when recommending products. For example:
-- High humidity: lighter, oil-free products
-- Low humidity: more hydrating products
-- High temperature: cooling, SPF protection
-- High UV: strong sun protection
-- Cold weather: barrier protection
-
-Focus on ingredient recommendations and explain why each step is important for the given weather and skin type."""
-    )
-    
-    # Create LangChain chain
-    chain = prompt_template | llm | StrOutputParser()
-    
-    try:
-        print(f"🤖 Generating recommendations with Ollama ({OLLAMA_MODEL})...")
-        
-        # Generate response
-        response = chain.invoke({
-            "temperature": temp,
-            "humidity": humidity,
-            "weather_condition": weather_condition,
-            "uv_index": uv_index,
-            "skin_type": skin_type or "normal",
-            "skin_concerns": ", ".join(skin_concerns) if skin_concerns else "general skincare"
-        })
-        
-        print(f"📝 Raw Ollama response length: {len(response)} characters")
-        
-        # Parse the response
-        return parse_ollama_response(response, weather_data)
-        
-    except Exception as e:
-        print(f"❌ Ollama generation failed: {str(e)}")
-        raise Exception(f"Ollama AI generation failed: {str(e)}")
-
-def parse_ollama_response(response, weather_data):
-    """
-    Parse Ollama response to extract morning and evening routines
-    """
-    morning_recs = []
-    evening_recs = []
-    
-    # Split response into lines
-    lines = response.split('\n')
-    current_section = None
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Detect section headers
-        if 'MORNING' in line.upper() and 'ROUTINE' in line.upper():
-            current_section = 'morning'
-            continue
-        elif 'EVENING' in line.upper() and 'ROUTINE' in line.upper():
-            current_section = 'evening'
-            continue
-        
-        # Extract numbered steps
-        if re.match(r'^\d+\.', line):
-            # Remove the number and clean the text
-            clean_line = re.sub(r'^\d+\.\s*', '', line)
-            
-            if current_section == 'morning' and len(morning_recs) < 6:
-                morning_recs.append(clean_line)
-            elif current_section == 'evening' and len(evening_recs) < 6:
-                evening_recs.append(clean_line)
-    
-    # Fallback: if parsing failed, try to extract any meaningful skincare steps
-    if len(morning_recs) < 3 or len(evening_recs) < 3:
-        all_lines = [line.strip() for line in lines if line.strip() and len(line.strip()) > 20]
-        
-        # Take first half as morning, second half as evening
-        mid_point = len(all_lines) // 2
-        if len(morning_recs) < 3:
-            morning_recs = all_lines[:mid_point][:6]
-        if len(evening_recs) < 3:
-            evening_recs = all_lines[mid_point:][:6]
-    
-    # Ensure we have at least basic recommendations
-    if not morning_recs:
-        morning_recs = get_basic_morning_recs(weather_data)
-    if not evening_recs:
-        evening_recs = get_basic_evening_recs(weather_data)
-    
-    # Ensure exactly 6 steps each
-    morning_recs = morning_recs[:6]
-    evening_recs = evening_recs[:6]
-    
-    # Pad with generic steps if needed
-    while len(morning_recs) < 6:
-        morning_recs.append("Complete your morning routine with a hydrating face mist")
-    while len(evening_recs) < 6:
-        evening_recs.append("Finish with a nourishing overnight treatment")
-    
-    return {
-        'morning': morning_recs,
-        'evening': evening_recs,
-        'ai_generated': True,
-        'source': f'Ollama ({OLLAMA_MODEL})',
-        'weather_adapted': True
-    }
-
-def get_ai_weather_recommendations(weather_data, skin_type=None, skin_concerns=None):
-    """
-    Generate personalized skincare recommendations using Ollama
-    """
-    try:
-        # Extract weather data
-        temp = weather_data['main']['temp']
-        humidity = weather_data['main']['humidity']
-        weather_condition = weather_data['weather'][0]['description']
-        uv_index = weather_data.get('uvi', 5)
-        
-        print(f"🌤️ Weather: {temp}°C, {humidity}% humidity, {weather_condition}, UV: {uv_index}")
-        print(f"👤 Skin type: {skin_type}, Concerns: {skin_concerns}")
-        
-        # Try Ollama first
-        if OLLAMA_ENABLED and check_ollama_health():
-            try:
-                print("🤖 Trying Ollama...")
-                result = get_ollama_recommendations(weather_data, skin_type, skin_concerns)
-                if result and result.get('ai_generated', False):
-                    print(f"✅ Successfully got AI recommendations from Ollama")
-                    return result
-            except Exception as e:
-                print(f"❌ Failed to get recommendations from Ollama: {str(e)}")
-        
-        # If Ollama fails, use intelligent fallback
-        print("🔄 Ollama not available, using intelligent fallback")
-        return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
-        
-    except Exception as e:
-        print(f"💥 Error in get_ai_weather_recommendations: {str(e)}")
-        return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
-
 def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_concerns=None):
     """
-    Intelligent fallback with much more sophisticated logic
+    Intelligent fallback with sophisticated weather-based logic
     """
     temp = weather_data['main']['temp']
     humidity = weather_data['main']['humidity']
@@ -445,7 +156,7 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     morning_recs = []
     evening_recs = []
     
-    print(f"🧠 Using intelligent fallback for {temp}°C, {humidity}% humidity, {weather_condition}")
+    print(f"Using intelligent recommendations for {temp}°C, {humidity}% humidity, {weather_condition}")
     
     # Morning routine logic
     # Step 1: Cleanser
@@ -554,61 +265,34 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
         'weather_adapted': True
     }
 
-def get_basic_morning_recs(weather_data):
-    """Generate basic morning recommendations based on weather"""
-    temp = weather_data['main']['temp']
-    humidity = weather_data['main']['humidity']
-    
-    recs = ['Gentle cleanser to start the day']
-    
-    if humidity > 70:
-        recs.append('Oil-free moisturizer for high humidity')
-    elif humidity < 30:
-        recs.append('Hydrating serum for dry air')
-    else:
-        recs.append('Balanced moisturizer')
-    
-    if temp > 25:
-        recs.append('SPF 50+ sunscreen for hot weather')
-        recs.append('Lightweight antioxidant serum')
-    else:
-        recs.append('SPF 30+ broad spectrum sunscreen')
-    
-    recs.append('Vitamin C serum for environmental protection')
-    recs.append('Hydrating face mist for the day')
-    
-    return recs
+def get_ai_weather_recommendations(weather_data, skin_type=None, skin_concerns=None):
+    """
+    Generate personalized skincare recommendations
+    """
+    try:
+        # Extract weather data
+        temp = weather_data['main']['temp']
+        humidity = weather_data['main']['humidity']
+        weather_condition = weather_data['weather'][0]['description']
+        uv_index = weather_data.get('uvi', 5)
+        
+        print(f"Weather: {temp}°C, {humidity}% humidity, {weather_condition}, UV: {uv_index}")
+        print(f"Skin type: {skin_type}, Concerns: {skin_concerns}")
+        
+        # Use intelligent fallback for production
+        print("Using intelligent algorithm for recommendations")
+        return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
+        
+    except Exception as e:
+        print(f"Error in get_ai_weather_recommendations: {str(e)}")
+        return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
 
-def get_basic_evening_recs(weather_data):
-    """Generate basic evening recommendations based on weather"""
-    temp = weather_data['main']['temp']
-    humidity = weather_data['main']['humidity']
-    
-    recs = [
-        'Double cleanse to remove sunscreen and pollutants',
-        'Gentle toner to balance pH'
-    ]
-    
-    if humidity < 40:
-        recs.append('Hyaluronic acid serum for extra hydration')
-        recs.append('Rich night moisturizer')
-    else:
-        recs.append('Light night moisturizer')
-    
-    if temp < 15:
-        recs.append('Nourishing face oil for cold weather protection')
-    
-    recs.append('Overnight repair treatment 2-3 times a week')
-    
-    return recs
-
-# ENHANCED: Better error handling and logging for weather API
 def get_enhanced_weather_data(city):
     """
-    Get comprehensive weather data including UV index and air quality if available
+    Get comprehensive weather data including UV index
     """
     if not OPENWEATHER_API_KEY:
-        print("❌ OpenWeather API key not configured")
+        print("OpenWeather API key not configured")
         return None
         
     # Clean city name and handle common variations
@@ -629,14 +313,14 @@ def get_enhanced_weather_data(city):
     url = f"https://api.openweathermap.org/data/2.5/weather?q={api_city}&appid={OPENWEATHER_API_KEY}&units=metric"
     
     try:
-        print(f"🌍 Making weather API request for: {api_city}")
+        print(f"Making weather API request for: {api_city}")
         response = requests.get(url, timeout=10)
         
-        print(f"📡 API Response status: {response.status_code}")
+        print(f"API Response status: {response.status_code}")
         
         if response.status_code == 200:
             weather_data = response.json()
-            print(f"✅ Weather data retrieved for {weather_data.get('name', city)}")
+            print(f"Weather data retrieved for {weather_data.get('name', city)}")
             
             # Try to get UV index data
             try:
@@ -647,41 +331,41 @@ def get_enhanced_weather_data(city):
                 if uv_response.status_code == 200:
                     uv_data = uv_response.json()
                     weather_data['uvi'] = uv_data.get('value', 5)
-                    print(f"✅ UV index retrieved: {weather_data['uvi']}")
+                    print(f"UV index retrieved: {weather_data['uvi']}")
                 else:
                     weather_data['uvi'] = 5  # Default moderate UV index
-                    print("⚠️ UV index not available, using default")
+                    print("UV index not available, using default")
             except Exception as e:
                 weather_data['uvi'] = 5  # Default moderate UV index
-                print(f"⚠️ Could not fetch UV index: {str(e)}")
+                print(f"Could not fetch UV index: {str(e)}")
                 
             return weather_data
         elif response.status_code == 404:
-            print(f"❌ City not found: {api_city}")
+            print(f"City not found: {api_city}")
             # Try without country code if it was added
             if ',' in api_city:
                 simple_city = api_city.split(',')[0]
-                print(f"🔄 Retrying with simple city name: {simple_city}")
+                print(f"Retrying with simple city name: {simple_city}")
                 simple_url = f"https://api.openweathermap.org/data/2.5/weather?q={simple_city}&appid={OPENWEATHER_API_KEY}&units=metric"
                 retry_response = requests.get(simple_url, timeout=10)
                 if retry_response.status_code == 200:
                     weather_data = retry_response.json()
                     weather_data['uvi'] = 5  # Default UV index
-                    print(f"✅ Weather data retrieved for {weather_data.get('name', simple_city)} on retry")
+                    print(f"Weather data retrieved for {weather_data.get('name', simple_city)} on retry")
                     return weather_data
             return None
         elif response.status_code == 401:
-            print("❌ Invalid API key for OpenWeather")
+            print("Invalid API key for OpenWeather")
             return None
         else:
-            print(f"❌ Weather API error: {response.status_code} - {response.text}")
+            print(f"Weather API error: {response.status_code} - {response.text}")
             return None
             
     except requests.exceptions.Timeout:
-        print("❌ Weather API request timed out")
+        print("Weather API request timed out")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"❌ Weather API request failed: {str(e)}")
+        print(f"Weather API request failed: {str(e)}")
         return None
 
 # Helper functions
@@ -693,6 +377,15 @@ def preprocess_image_for_cancer_detection(img):
     img = np.expand_dims(img, axis=0)
     img = img / 255.0
     return img
+
+try:
+    # Load skin cancer detection model
+    skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
+    ML_ENABLED = True
+    print("Skin cancer model loaded successfully")
+except:
+    ML_ENABLED = False
+    print("Skin cancer model not found, ML features disabled")
 
 # Routes
 @app.route('/')
@@ -707,14 +400,14 @@ def weather_recommendations():
     if request.method == 'POST':
         city = request.form.get('city')
         if city:
-            print(f"🌍 Getting weather data for: {city}")
+            print(f"Getting weather data for: {city}")
             weather_data = get_enhanced_weather_data(city)
             if weather_data:
                 # Get user's skin type and concerns from session
                 skin_type = session.get('skin_type')
                 skin_concerns = session.get('skin_concerns', [])
                 
-                print(f"📊 Weather data retrieved: {weather_data['main']['temp']}°C, {weather_data['main']['humidity']}%")
+                print(f"Weather data retrieved: {weather_data['main']['temp']}°C, {weather_data['main']['humidity']}%")
                 
                 # Get AI-powered recommendations
                 recommendation = get_ai_weather_recommendations(
@@ -728,9 +421,9 @@ def weather_recommendations():
                 weather_condition = weather_data['weather'][0]['description']
                 uv_index = weather_data.get('uvi', 'N/A')
                 
-                print(f"✅ Recommendations generated successfully!")
-                print(f"🤖 AI Generated: {recommendation.get('ai_generated', False)}")
-                print(f"📝 Source: {recommendation.get('source', 'Unknown')}")
+                print(f"Recommendations generated successfully!")
+                print(f"AI Generated: {recommendation.get('ai_generated', False)}")
+                print(f"Source: {recommendation.get('source', 'Unknown')}")
                 
                 return render_template('weather.html', 
                                     recommendation=recommendation,
@@ -743,7 +436,7 @@ def weather_recommendations():
                                     source=recommendation.get('source', 'Unknown'))
             else:
                 error = "City not found. Please check the spelling and try again. Try using just the city name (e.g., 'Delhi' instead of 'New Delhi')."
-                print(f"❌ Weather data not found for city: {city}")
+                print(f"Weather data not found for city: {city}")
     
     return render_template('weather.html', error=error)
 
@@ -821,8 +514,8 @@ def quiz_result():
     session['skin_type'] = skin_type
     session['skin_concerns'] = skin_concerns
     
-    print(f"👤 User skin type determined: {skin_type}")
-    print(f"🎯 User skin concerns: {skin_concerns}")
+    print(f"User skin type determined: {skin_type}")
+    print(f"User skin concerns: {skin_concerns}")
     
     return render_template('quiz_result.html', 
                           skin_type=skin_type,
@@ -844,10 +537,6 @@ def condition_detail(condition):
 @app.route('/cancer-predict', methods=['GET', 'POST'])
 def cancer_predict():
     if request.method == 'POST':
-        if not ML_ENABLED:
-            flash('Skin cancer detection model is currently unavailable. Please try again later.')
-            return render_template('predict.html', ml_enabled=ML_ENABLED)
-            
         if 'file' not in request.files:
             flash('No file part')
             return redirect(request.url)
@@ -858,47 +547,39 @@ def cancer_predict():
             return redirect(request.url)
             
         if file and allowed_file(file.filename):
-            try:
-                # Save the uploaded file
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                
-                # Read and process the image
-                img_array = cv2.imread(filepath)
-                if img_array is None:
-                    flash('Invalid image file. Please upload a valid JPG, PNG, or JPEG image.')
+            # Save the uploaded file
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            
+            # Read and process the image
+            img_array = cv2.imread(filepath)
+            if img_array is None:
+                flash('Invalid image file')
+                return redirect(request.url)
+            
+            # Predict using skin cancer model
+            if ML_ENABLED:
+                try:
+                    processed_img = preprocess_image_for_cancer_detection(img_array)
+                    pred = skin_cancer_model.predict(processed_img)
+                    
+                    label = 'Cancer' if pred[0][0] > 0.7452 else 'Not Cancer'
+                    probability = float(pred[0][0])
+                    
+                    print(f"Skin cancer prediction: {label} (probability: {probability:.4f})")
+                    
+                    return render_template('predict.html', 
+                                           image_path=filepath, 
+                                           label=label, 
+                                           probability=probability,
+                                           ml_enabled=ML_ENABLED)
+                except Exception as e:
+                    print(f"Error in skin cancer prediction: {str(e)}")
+                    flash('Error processing image for prediction')
                     return redirect(request.url)
-                
-                # Predict using skin cancer model
-                processed_img = preprocess_image_for_cancer_detection(img_array)
-                pred = skin_cancer_model.predict(processed_img)
-                
-                # Calculate results
-                cancer_probability = float(pred[0][0])
-                is_cancer = cancer_probability > 0.7452
-                label = 'Cancer' if is_cancer else 'Not Cancer'
-                confidence = cancer_probability if is_cancer else (1 - cancer_probability)
-                
-                print(f"🔬 Skin cancer prediction: {label} (confidence: {confidence:.4f})")
-                
-                # Add disclaimer
-                disclaimer = """
-                IMPORTANT DISCLAIMER: This AI prediction is for educational purposes only and should NOT be used as a substitute for professional medical diagnosis. 
-                Please consult with a qualified dermatologist or healthcare provider for proper evaluation of any skin concerns.
-                """
-                
-                return render_template('predict.html', 
-                                       image_path=filepath, 
-                                       label=label, 
-                                       probability=cancer_probability,
-                                       confidence=confidence,
-                                       ml_enabled=ML_ENABLED,
-                                       disclaimer=disclaimer)
-                                       
-            except Exception as e:
-                print(f"❌ Error in skin cancer prediction: {str(e)}")
-                flash('Error processing image. Please try again with a different image.')
+            else:
+                flash('Skin cancer detection model is not available')
                 return redirect(request.url)
     
     return render_template('predict.html', ml_enabled=ML_ENABLED)
@@ -918,7 +599,7 @@ def api_recommendations():
         if not city:
             return jsonify({'error': 'City is required'}), 400
             
-        print(f"🌍 API request for city: {city}, skin_type: {skin_type}")
+        print(f"API request for city: {city}, skin_type: {skin_type}")
             
         weather_data = get_enhanced_weather_data(city)
         if not weather_data:
@@ -942,11 +623,11 @@ def api_recommendations():
             'timestamp': datetime.now().isoformat()
         }
         
-        print(f"✅ API response generated successfully")
+        print(f"API response generated successfully")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"❌ API error: {str(e)}")
+        print(f"API error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 # Health check endpoint
@@ -955,8 +636,6 @@ def health_check():
     """
     Health check endpoint for monitoring
     """
-    ollama_status = check_ollama_health() if OLLAMA_ENABLED else False
-    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
@@ -964,37 +643,10 @@ def health_check():
         'ai_services': {
             'ollama': {
                 'enabled': OLLAMA_ENABLED,
-                'healthy': ollama_status,
-                'model': OLLAMA_MODEL if OLLAMA_ENABLED else None,
-                'base_url': OLLAMA_BASE_URL if OLLAMA_ENABLED else None
+                'healthy': False
             }
         }
     })
-
-# Ollama status endpoint
-@app.route('/ollama/status')
-def ollama_status():
-    """
-    Check Ollama status and available models
-    """
-    if not OLLAMA_ENABLED:
-        return jsonify({'error': 'Ollama not configured'}), 400
-    
-    try:
-        # Check if Ollama is running
-        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
-        if response.status_code == 200:
-            models = response.json().get('models', [])
-            return jsonify({
-                'status': 'running',
-                'base_url': OLLAMA_BASE_URL,
-                'current_model': OLLAMA_MODEL,
-                'available_models': [model['name'] for model in models]
-            })
-        else:
-            return jsonify({'error': 'Ollama not responding'}), 503
-    except Exception as e:
-        return jsonify({'error': f'Ollama connection failed: {str(e)}'}), 503
 
 # Clear session route
 @app.route('/clear-session')
@@ -1011,7 +663,7 @@ def clear_session():
 def before_request():
     if 'user_id' not in session:
         session['user_id'] = secrets.token_hex(8)
-        print(f"👤 New user session created: {session['user_id']}")
+        print(f"New user session created: {session['user_id']}")
 
 # Enhanced context processor to make certain variables available in all templates
 @app.context_processor
@@ -1025,24 +677,19 @@ def inject_user_info():
         'datetime': datetime
     }
 
-# Initialize model on startup
-print("🚀 Initializing Skin Cancer Detection Model...")
-try:
-    load_skin_cancer_model()
-except Exception as e:
-    ML_ENABLED = False
-    print(f"⚠️ Could not initialize skin cancer model: {str(e)}")
-
 if __name__ == '__main__':
-    print("🚀 Starting SkinSense Application...")
-    print(f"🔑 OpenWeather API: {'✅ Configured' if OPENWEATHER_API_KEY else '❌ Missing'}")
-    print(f"🤖 Ollama: {'✅ Enabled' if OLLAMA_ENABLED else '❌ Disabled'}")
-    if OLLAMA_ENABLED:
-        print(f"   - Model: {OLLAMA_MODEL}")
-        print(f"   - Base URL: {OLLAMA_BASE_URL}")
-        print(f"   - Health: {'✅ Healthy' if check_ollama_health() else '❌ Not responding'}")
-    print(f"🔬 ML Model: {'✅ Loaded' if ML_ENABLED else '❌ Not available'}")
+    # Get port from environment variable (Render sets this automatically)
+    port = int(os.environ.get('PORT', 5000))
+    
+    print("Starting SkinSense Application...")
+    print(f"OpenWeather API: {'Configured' if OPENWEATHER_API_KEY else 'Missing'}")
+    print(f"Ollama: {'Enabled' if OLLAMA_ENABLED else 'Disabled'}")
+    print(f"ML Model: {'Loaded' if ML_ENABLED else 'Not available'}")
+    print(f"Port: {port}")
     print("=" * 50)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # For production (like Render), don't use debug mode
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
+    
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
 
