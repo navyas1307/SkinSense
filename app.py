@@ -8,11 +8,6 @@ from werkzeug.utils import secure_filename
 import numpy as np
 from PIL import Image
 import cv2
-import pickle
-import tensorflow as tf
-import pandas as pd
-import numpy as np
-from keras.models import load_model
 import time
 from dotenv import load_dotenv
 import re
@@ -31,12 +26,22 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 # API Keys
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '2f021261bac8c9f5f35de84b6486589e')
 
-# Model Configuration
+# Model Configuration - DISABLE FOR MEMORY OPTIMIZATION
 SKIN_CANCER_MODEL_PATH = 'skin_cancer_model.h5'
 SKIN_CANCER_IMG_SIZE = (224, 224)
-
-# Your specific Google Drive file ID
 GOOGLE_DRIVE_FILE_ID = os.getenv('GOOGLE_DRIVE_FILE_ID', '1Mt2Xvx--d04qxP-rrrfZcjAsj8RN_IPN')
+
+# Memory optimization: Lazy import TensorFlow only when needed
+tensorflow_available = False
+skin_cancer_model = None
+ML_ENABLED = False
+
+# Check memory constraints - disable ML on low memory environments
+MEMORY_LIMIT_MB = int(os.environ.get('MEMORY_LIMIT_MB', '512'))
+ENABLE_ML = os.environ.get('ENABLE_ML', 'false').lower() == 'true'
+
+print(f"Memory limit: {MEMORY_LIMIT_MB}MB")
+print(f"ML explicitly enabled: {ENABLE_ML}")
 
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -44,11 +49,41 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Disable Ollama for production deployment
 OLLAMA_ENABLED = False
-print("Ollama disabled for production deployment")
 
-# Initialize ML variables
-skin_cancer_model = None
-ML_ENABLED = False
+def check_memory_usage():
+    """Check current memory usage"""
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        return memory_mb
+    except ImportError:
+        return 0
+
+def lazy_import_tensorflow():
+    """Lazy import TensorFlow to save memory"""
+    global tensorflow_available
+    if not tensorflow_available:
+        try:
+            import tensorflow as tf
+            from keras.models import load_model
+            
+            # Optimize TensorFlow for memory
+            tf.config.threading.set_intra_op_parallelism_threads(1)
+            tf.config.threading.set_inter_op_parallelism_threads(1)
+            
+            # Limit GPU memory growth if GPU is available
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            if gpus:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+            
+            tensorflow_available = True
+            return True
+        except ImportError as e:
+            print(f"TensorFlow not available: {e}")
+            return False
+    return True
 
 # Template filter for datetime formatting
 @app.template_filter('datetime')
@@ -150,236 +185,46 @@ SKIN_CONDITIONS = {
     }
 }
 
-def download_model_from_gdrive_fixed():
-    """
-    Enhanced download function with multiple fallback methods
-    """
-    max_attempts = 3
-    
-    # Your Google Drive file ID
-    file_id = GOOGLE_DRIVE_FILE_ID
-    
-    # Multiple download URLs to try
-    download_urls = [
-        f"https://drive.google.com/uc?export=download&id={file_id}",
-        f"https://drive.google.com/uc?id={file_id}&export=download",
-        f"https://docs.google.com/uc?export=download&id={file_id}"
-    ]
-    
-    for attempt in range(max_attempts):
-        for i, base_url in enumerate(download_urls):
-            try:
-                print(f"🔄 Attempt {attempt + 1}/{max_attempts}, Method {i + 1}: Downloading from Google Drive...")
-                print(f"📡 URL: {base_url}")
-                
-                # Use requests instead of gdown for better control
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-                
-                session = requests.Session()
-                response = session.get(base_url, headers=headers, stream=True, timeout=30)
-                
-                # Handle Google Drive's virus scan warning for large files
-                if 'confirm=' in response.text or 'download_warning' in response.text:
-                    print("🔐 Handling Google Drive download confirmation...")
-                    
-                    # Extract confirmation token
-                    confirm_token = None
-                    for line in response.text.split('\n'):
-                        if 'confirm=' in line:
-                            match = re.search(r'confirm=([^&"]+)', line)
-                            if match:
-                                confirm_token = match.group(1)
-                                break
-                    
-                    if confirm_token:
-                        confirmed_url = f"{base_url}&confirm={confirm_token}"
-                        response = session.get(confirmed_url, headers=headers, stream=True, timeout=30)
-                
-                if response.status_code == 200:
-                    print("✅ Download started, saving file...")
-                    
-                    # Save the file with progress tracking
-                    total_size = int(response.headers.get('content-length', 0))
-                    downloaded_size = 0
-                    
-                    with open(SKIN_CANCER_MODEL_PATH, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                                downloaded_size += len(chunk)
-                                
-                                if total_size > 0:
-                                    progress = (downloaded_size / total_size) * 100
-                                    print(f"\r📥 Progress: {progress:.1f}% ({downloaded_size / (1024*1024):.1f} MB)", end='', flush=True)
-                    
-                    print(f"\n✅ Download completed! File size: {downloaded_size / (1024*1024):.1f} MB")
-                    
-                    # Verify the downloaded file
-                    if os.path.exists(SKIN_CANCER_MODEL_PATH) and os.path.getsize(SKIN_CANCER_MODEL_PATH) > 1024 * 1024:  # At least 1MB
-                        try:
-                            # Try to load the model to verify it's valid
-                            print("🔍 Verifying downloaded model...")
-                            test_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
-                            print("✅ Model file is valid and loadable!")
-                            del test_model  # Free memory
-                            return True
-                        except Exception as e:
-                            print(f"❌ Downloaded file is not a valid model: {str(e)}")
-                            if os.path.exists(SKIN_CANCER_MODEL_PATH):
-                                os.remove(SKIN_CANCER_MODEL_PATH)
-                            continue
-                    else:
-                        print("❌ Downloaded file is too small or doesn't exist")
-                        if os.path.exists(SKIN_CANCER_MODEL_PATH):
-                            os.remove(SKIN_CANCER_MODEL_PATH)
-                        continue
-                        
-                else:
-                    print(f"❌ Download failed with status code: {response.status_code}")
-                    
-            except requests.exceptions.Timeout:
-                print(f"⏰ Download timed out for method {i + 1}")
-            except Exception as e:
-                print(f"❌ Error with method {i + 1}: {str(e)}")
-        
-        # Wait before retry (except on last attempt)
-        if attempt < max_attempts - 1:
-            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-            print(f"⏳ Waiting {wait_time} seconds before retry...")
-            time.sleep(wait_time)
-    
-    print("❌ Failed to download model after all attempts and methods")
-    return False
-
-def validate_model_file():
-    """
-    Validate that the model file is correct and loadable
-    """
-    if not os.path.exists(SKIN_CANCER_MODEL_PATH):
-        return False, "Model file does not exist"
-    
-    file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH)
-    if file_size < 1024 * 1024:  # Less than 1MB is suspicious
-        return False, f"Model file too small: {file_size} bytes"
-    
-    try:
-        # Try to load without adding to global variables
-        test_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
-        
-        # Basic checks
-        if test_model.input_shape is None:
-            return False, "Model has no input shape"
-        if test_model.output_shape is None:
-            return False, "Model has no output shape"
-        
-        # Clean up
-        del test_model
-        return True, "Model file is valid"
-        
-    except Exception as e:
-        return False, f"Model loading error: {str(e)}"
-
-def load_skin_cancer_model_fixed():
-    """
-    Enhanced model loading with better error handling
-    """
+def load_model_on_demand():
+    """Load model only when needed to save memory"""
     global skin_cancer_model, ML_ENABLED
     
-    try:
-        # Check if model exists locally first
-        if os.path.exists(SKIN_CANCER_MODEL_PATH):
-            print("📁 Found local model file, checking integrity...")
+    if not ENABLE_ML:
+        print("ML disabled by environment variable")
+        return None
+        
+    current_memory = check_memory_usage()
+    if current_memory > MEMORY_LIMIT_MB * 0.8:  # 80% of limit
+        print(f"Memory usage too high ({current_memory:.1f}MB), skipping ML model")
+        return None
+    
+    if not lazy_import_tensorflow():
+        return None
+        
+    if skin_cancer_model is None:
+        try:
+            import tensorflow as tf
+            from keras.models import load_model
             
-            # Check file size first
-            file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH)
-            if file_size < 1024 * 1024:  # Less than 1MB is definitely wrong for this model
-                print(f"❌ Model file too small ({file_size} bytes), deleting...")
-                os.remove(SKIN_CANCER_MODEL_PATH)
+            if os.path.exists(SKIN_CANCER_MODEL_PATH):
+                print("Loading model on demand...")
+                skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
+                skin_cancer_model.compile(
+                    optimizer='adam',
+                    loss='binary_crossentropy',
+                    metrics=['accuracy']
+                )
+                ML_ENABLED = True
+                print(f"Model loaded successfully, memory usage: {check_memory_usage():.1f}MB")
             else:
-                try:
-                    print(f"📊 Model file size: {file_size / (1024*1024):.1f} MB")
-                    
-                    # Try to load with custom error handling
-                    print("🔄 Loading model...")
-                    
-                    # Set TensorFlow to be less strict about warnings
-                    tf.get_logger().setLevel('ERROR')
-                    
-                    skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
-                    
-                    # Recompile the model with proper settings
-                    skin_cancer_model.compile(
-                        optimizer='adam',
-                        loss='binary_crossentropy',
-                        metrics=['accuracy']
-                    )
-                    
-                    ML_ENABLED = True
-                    print("✅ Local model loaded and compiled successfully!")
-                    
-                    # Print model info
-                    print("📋 Model Information:")
-                    print(f"   - Input shape: {skin_cancer_model.input_shape}")
-                    print(f"   - Output shape: {skin_cancer_model.output_shape}")
-                    print(f"   - Total parameters: {skin_cancer_model.count_params():,}")
-                    
-                    return True
-                    
-                except Exception as e:
-                    print(f"❌ Local model loading failed: {str(e)}")
-                    print("🗑️ Deleting corrupted file...")
-                    if os.path.exists(SKIN_CANCER_MODEL_PATH):
-                        os.remove(SKIN_CANCER_MODEL_PATH)
-        
-        # Download model from Google Drive
-        print("📥 Downloading skin cancer model from Google Drive...")
-        if download_model_from_gdrive_fixed():
-            # Load the downloaded model
-            print("🔄 Loading downloaded model...")
-            
-            tf.get_logger().setLevel('ERROR')
-            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
-            
-            # Recompile the model
-            skin_cancer_model.compile(
-                optimizer='adam',
-                loss='binary_crossentropy',
-                metrics=['accuracy']
-            )
-            
-            ML_ENABLED = True
-            print("✅ Downloaded model loaded and compiled successfully!")
-            
-            # Print model summary for verification
-            print("📊 Model Summary:")
-            print(f"   - Input shape: {skin_cancer_model.input_shape}")
-            print(f"   - Output shape: {skin_cancer_model.output_shape}")
-            print(f"   - Total params: {skin_cancer_model.count_params():,}")
-            
-            return True
-        else:
-            print("❌ Failed to download model from Google Drive")
-            ML_ENABLED = False
-            return False
-            
-    except Exception as e:
-        print(f"❌ Critical error loading skin cancer model: {str(e)}")
-        ML_ENABLED = False
-        return False
-
-def get_skin_cancer_model_fixed():
-    """
-    Get the skin cancer model with improved lazy loading
-    """
-    global skin_cancer_model, ML_ENABLED
+                print("Model file not found")
+                return None
+                
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            return None
     
-    if not ML_ENABLED or skin_cancer_model is None:
-        print("🔄 Model not loaded, attempting to load...")
-        load_skin_cancer_model_fixed()
-    
-    return skin_cancer_model if ML_ENABLED else None
+    return skin_cancer_model
 
 def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_concerns=None):
     """
@@ -394,10 +239,7 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     morning_recs = []
     evening_recs = []
     
-    print(f"Using intelligent recommendations for {temp}°C, {humidity}% humidity, {weather_condition}")
-    
     # Morning routine logic
-    # Step 1: Cleanser
     if skin_type == 'oily':
         morning_recs.append('Salicylic acid gel cleanser for oil control')
     elif skin_type == 'dry':
@@ -407,7 +249,6 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         morning_recs.append('Gentle foaming cleanser for daily use')
     
-    # Step 2: Treatment serum
     if temp > 25 and humidity > 70:
         morning_recs.append('Niacinamide serum to control oil and minimize pores in humid weather')
     elif temp < 15 or humidity < 40:
@@ -417,7 +258,6 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         morning_recs.append('Balanced antioxidant serum with vitamin E for daily protection')
     
-    # Step 3: Moisturizer
     if humidity > 80:
         morning_recs.append('Oil-free gel moisturizer perfect for high humidity conditions')
     elif humidity < 30:
@@ -427,7 +267,6 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         morning_recs.append('Balanced daily moisturizer with light SPF protection')
     
-    # Step 4: Sun protection
     if uv_index > 8:
         morning_recs.append(f'SPF 50+ broad spectrum sunscreen (UV index: {uv_index} - very high), reapply every 2 hours')
     elif uv_index > 5:
@@ -435,32 +274,12 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         morning_recs.append('SPF 30 daily sunscreen with moisturizing benefits')
     
-    # Step 5: Weather-specific protection
-    if wind_speed > 5:
-        morning_recs.append(f'Barrier cream or balm for wind protection (wind speed: {wind_speed} m/s)')
-    elif 'rain' in weather_condition:
-        morning_recs.append('Water-resistant sunscreen and setting spray for rainy conditions')
-    elif temp < 5:
-        morning_recs.append('Rich facial oil for extreme cold protection and barrier repair')
-    else:
-        morning_recs.append('Light facial mist for hydration throughout the day')
-    
-    # Step 6: Special care
-    if skin_concerns and 'acne' in skin_concerns:
-        morning_recs.append('Spot treatment with tea tree oil for targeted blemish care')
-    elif skin_concerns and 'aging' in skin_concerns:
-        morning_recs.append('Peptide serum for anti-aging and skin firming benefits')
-    else:
-        morning_recs.append('Eye cream with caffeine to reduce puffiness and brighten under-eyes')
-    
     # Evening routine logic
-    # Step 1: Double cleanse
     if humidity > 70 or 'rain' in weather_condition:
         evening_recs.append('Oil cleanser then foam cleanser (double cleanse) to remove humidity buildup')
     else:
         evening_recs.append('Micellar water followed by gentle cleanser for thorough cleansing')
     
-    # Step 2: Toner/Treatment
     if temp > 25 and skin_type == 'oily':
         evening_recs.append('BHA toner (2-3 times per week) for deep pore cleansing in warm weather')
     elif temp < 15 or humidity < 40:
@@ -468,7 +287,6 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         evening_recs.append('Gentle pH-balancing toner to prep skin for treatments')
     
-    # Step 3: Treatment serum
     if skin_concerns and 'hyperpigmentation' in skin_concerns:
         evening_recs.append('Vitamin C or alpha arbutin serum for dark spot correction')
     elif skin_type == 'dry' or humidity < 30:
@@ -476,7 +294,6 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         evening_recs.append('Retinol serum (start 1x/week, build up gradually) for skin renewal')
     
-    # Step 4: Moisturizer
     if temp < 10:
         evening_recs.append(f'Rich night cream with shea butter for cold weather ({temp}°C) protection')
     elif humidity > 75:
@@ -484,59 +301,28 @@ def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_
     else:
         evening_recs.append('Restorative night cream with peptides for overnight repair')
     
-    # Step 5: Special treatment
-    if humidity < 30 or temp < 5:
-        evening_recs.append('Nourishing facial oil (argan or rosehip) for extra protection against harsh conditions')
-    elif skin_type == 'oily' and humidity > 80:
-        evening_recs.append('Clay mask once a week to control excess oil in humid conditions')
-    else:
-        evening_recs.append('Weekly gentle exfoliation with AHA/BHA for cell turnover')
-    
-    # Step 6: Eye and lip care
-    evening_recs.append('Hydrating eye cream and nourishing lip balm for overnight repair')
-    
     return {
-        'morning': morning_recs[:6],
-        'evening': evening_recs[:6],
+        'morning': morning_recs[:4],
+        'evening': evening_recs[:4],
         'ai_generated': False,
         'source': 'Intelligent Weather Algorithm',
         'weather_adapted': True
     }
 
 def get_ai_weather_recommendations(weather_data, skin_type=None, skin_concerns=None):
-    """
-    Generate personalized skincare recommendations
-    """
+    """Generate personalized skincare recommendations"""
     try:
-        # Extract weather data
-        temp = weather_data['main']['temp']
-        humidity = weather_data['main']['humidity']
-        weather_condition = weather_data['weather'][0]['description']
-        uv_index = weather_data.get('uvi', 5)
-        
-        print(f"Weather: {temp}°C, {humidity}% humidity, {weather_condition}, UV: {uv_index}")
-        print(f"Skin type: {skin_type}, Concerns: {skin_concerns}")
-        
-        # Use intelligent fallback for production
-        print("Using intelligent algorithm for recommendations")
         return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
-        
     except Exception as e:
-        print(f"Error in get_ai_weather_recommendations: {str(e)}")
+        print(f"Error in recommendations: {str(e)}")
         return get_intelligent_fallback_recommendations(weather_data, skin_type, skin_concerns)
 
 def get_enhanced_weather_data(city):
-    """
-    Get comprehensive weather data including UV index
-    """
+    """Get comprehensive weather data including UV index"""
     if not OPENWEATHER_API_KEY:
-        print("OpenWeather API key not configured")
         return None
         
-    # Clean city name and handle common variations
     city = city.strip().title()
-    
-    # Handle common city name variations
     city_mappings = {
         'New Delhi': 'Delhi',
         'Busan': 'Busan,KR',
@@ -547,18 +333,13 @@ def get_enhanced_weather_data(city):
     }
     
     api_city = city_mappings.get(city, city)
-    
     url = f"https://api.openweathermap.org/data/2.5/weather?q={api_city}&appid={OPENWEATHER_API_KEY}&units=metric"
     
     try:
-        print(f"Making weather API request for: {api_city}")
         response = requests.get(url, timeout=10)
-        
-        print(f"API Response status: {response.status_code}")
         
         if response.status_code == 200:
             weather_data = response.json()
-            print(f"Weather data retrieved for {weather_data.get('name', city)}")
             
             # Try to get UV index data
             try:
@@ -569,44 +350,26 @@ def get_enhanced_weather_data(city):
                 if uv_response.status_code == 200:
                     uv_data = uv_response.json()
                     weather_data['uvi'] = uv_data.get('value', 5)
-                    print(f"UV index retrieved: {weather_data['uvi']}")
                 else:
-                    weather_data['uvi'] = 5  # Default moderate UV index
-                    print("UV index not available, using default")
-            except Exception as e:
-                weather_data['uvi'] = 5  # Default moderate UV index
-                print(f"Could not fetch UV index: {str(e)}")
+                    weather_data['uvi'] = 5
+            except:
+                weather_data['uvi'] = 5
                 
             return weather_data
-        elif response.status_code == 404:
-            print(f"City not found: {api_city}")
-            # Try without country code if it was added
-            if ',' in api_city:
-                simple_city = api_city.split(',')[0]
-                print(f"Retrying with simple city name: {simple_city}")
-                simple_url = f"https://api.openweathermap.org/data/2.5/weather?q={simple_city}&appid={OPENWEATHER_API_KEY}&units=metric"
-                retry_response = requests.get(simple_url, timeout=10)
-                if retry_response.status_code == 200:
-                    weather_data = retry_response.json()
-                    weather_data['uvi'] = 5  # Default UV index
-                    print(f"Weather data retrieved for {weather_data.get('name', simple_city)} on retry")
-                    return weather_data
-            return None
-        elif response.status_code == 401:
-            print("Invalid API key for OpenWeather")
-            return None
-        else:
-            print(f"Weather API error: {response.status_code} - {response.text}")
-            return None
-            
-    except requests.exceptions.Timeout:
-        print("Weather API request timed out")
+        elif response.status_code == 404 and ',' in api_city:
+            simple_city = api_city.split(',')[0]
+            simple_url = f"https://api.openweathermap.org/data/2.5/weather?q={simple_city}&appid={OPENWEATHER_API_KEY}&units=metric"
+            retry_response = requests.get(simple_url, timeout=10)
+            if retry_response.status_code == 200:
+                weather_data = retry_response.json()
+                weather_data['uvi'] = 5
+                return weather_data
         return None
-    except requests.exceptions.RequestException as e:
-        print(f"Weather API request failed: {str(e)}")
+            
+    except Exception as e:
+        print(f"Weather API error: {e}")
         return None
 
-# Helper functions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -616,56 +379,15 @@ def preprocess_image_for_cancer_detection(img):
     img = img / 255.0
     return img
 
-# Initialize model when the app starts
-print("🚀 Initializing Skin Cancer Detection Model...")
-print("=" * 60)
-print(f"📋 Model file: {SKIN_CANCER_MODEL_PATH}")
-print(f"🔗 Google Drive ID: {GOOGLE_DRIVE_FILE_ID}")
-
-# Check if we have a valid Google Drive ID
-if not GOOGLE_DRIVE_FILE_ID or GOOGLE_DRIVE_FILE_ID == 'YOUR_ACTUAL_FILE_ID_HERE':
-    print("⚠️  Google Drive file ID not configured!")
-    print("❌ Please set GOOGLE_DRIVE_FILE_ID environment variable")
-    ML_ENABLED = False
-else:
-    print(f"✅ Google Drive ID configured: {GOOGLE_DRIVE_FILE_ID}")
-
-print("=" * 60)
-
-# Initialize with better error handling
-try:
-    success = load_skin_cancer_model_fixed()
-    
-    if success and ML_ENABLED:
-        print("🎉 Skin Cancer Detection is READY!")
-        print("✅ Users can now upload images for cancer screening")
-        
-        # Validate the loaded model
-        is_valid, validation_msg = validate_model_file()
-        print(f"🔍 Model validation: {validation_msg}")
-        
-        if not is_valid:
-            print("⚠️  Model validation failed, disabling ML features")
-            ML_ENABLED = False
-            skin_cancer_model = None
-            
-    else:
-        print("⚠️  Skin Cancer Detection is UNAVAILABLE") 
-        print("❌ Cancer prediction feature will be disabled")
-        print("💡 Check your Google Drive file ID and internet connection")
-        
-except Exception as e:
-    print(f"💥 Failed to initialize model: {str(e)}")
-    print("📋 Error details:")
-    traceback.print_exc()
-    ML_ENABLED = False
-
-print("=" * 60)
+# Initialize with memory optimization
+print("Initializing SkinSense Application...")
+print(f"Memory optimization enabled - ML features: {'enabled' if ENABLE_ML else 'disabled'}")
+print(f"Current memory usage: {check_memory_usage():.1f}MB")
 
 # Routes
 @app.route('/')
 def index():
-    return render_template('index.html', ml_enabled=ML_ENABLED, ollama_enabled=OLLAMA_ENABLED)
+    return render_template('index.html', ml_enabled=ENABLE_ML, ollama_enabled=OLLAMA_ENABLED)
 
 @app.route('/weather', methods=['GET', 'POST'])
 def weather_recommendations():
@@ -675,16 +397,11 @@ def weather_recommendations():
     if request.method == 'POST':
         city = request.form.get('city')
         if city:
-            print(f"Getting weather data for: {city}")
             weather_data = get_enhanced_weather_data(city)
             if weather_data:
-                # Get user's skin type and concerns from session
                 skin_type = session.get('skin_type')
                 skin_concerns = session.get('skin_concerns', [])
                 
-                print(f"Weather data retrieved: {weather_data['main']['temp']}°C, {weather_data['main']['humidity']}%")
-                
-                # Get AI-powered recommendations
                 recommendation = get_ai_weather_recommendations(
                     weather_data, 
                     skin_type=skin_type,
@@ -696,10 +413,6 @@ def weather_recommendations():
                 weather_condition = weather_data['weather'][0]['description']
                 uv_index = weather_data.get('uvi', 'N/A')
                 
-                print(f"Recommendations generated successfully!")
-                print(f"AI Generated: {recommendation.get('ai_generated', False)}")
-                print(f"Source: {recommendation.get('source', 'Unknown')}")
-                
                 return render_template('weather.html', 
                                     recommendation=recommendation,
                                     city=city,
@@ -710,8 +423,7 @@ def weather_recommendations():
                                     ai_powered=recommendation.get('ai_generated', False),
                                     source=recommendation.get('source', 'Unknown'))
             else:
-                error = "City not found. Please check the spelling and try again. Try using just the city name (e.g., 'Delhi' instead of 'New Delhi')."
-                print(f"Weather data not found for city: {city}")
+                error = "City not found. Please check the spelling and try again."
     
     return render_template('weather.html', error=error)
 
@@ -723,16 +435,11 @@ def skin_quiz():
 def quiz_result():
     answers = request.form.to_dict()
     
-    # Simple scoring system for skin type quiz
     scores = {
-        'dry': 0,
-        'oily': 0,
-        'combination': 0,
-        'sensitive': 0,
-        'normal': 0
+        'dry': 0, 'oily': 0, 'combination': 0, 'sensitive': 0, 'normal': 0
     }
     
-    # Process quiz answers 
+    # Process quiz answers (simplified for memory optimization)
     if 'q1' in answers:
         if answers['q1'] == 'tight':
             scores['dry'] += 2
@@ -749,31 +456,7 @@ def quiz_result():
             scores['dry'] += 1
         elif answers['q2'] == 'mixed':
             scores['combination'] += 2
-            
-    if 'q3' in answers:
-        if answers['q3'] == 'often':
-            scores['sensitive'] += 2
-        elif answers['q3'] == 'sometimes':
-            scores['sensitive'] += 1
-            
-    if 'q4' in answers:
-        if answers['q4'] == 'shiny':
-            scores['oily'] += 2
-        elif answers['q4'] == 'flaky':
-            scores['dry'] += 2
-        elif answers['q4'] == 'both':
-            scores['combination'] += 2
-            
-    if 'q5' in answers:
-        if answers['q5'] == 'tzone':
-            scores['combination'] += 2
-        elif answers['q5'] == 'all':
-            scores['oily'] += 2
-        elif answers['q5'] == 'none':
-            scores['normal'] += 2
-            scores['dry'] += 1
     
-    # Additional questions for skin concerns
     skin_concerns = []
     if 'concerns' in answers:
         concerns_input = answers['concerns']
@@ -782,15 +465,10 @@ def quiz_result():
         else:
             skin_concerns = [concerns_input]
             
-    # Find the skin type with the highest score
     skin_type = max(scores, key=scores.get)
     
-    # Store in session for future use
     session['skin_type'] = skin_type
     session['skin_concerns'] = skin_concerns
-    
-    print(f"User skin type determined: {skin_type}")
-    print(f"User skin concerns: {skin_concerns}")
     
     return render_template('quiz_result.html', 
                           skin_type=skin_type,
@@ -811,6 +489,11 @@ def condition_detail(condition):
 
 @app.route('/cancer-predict', methods=['GET', 'POST'])
 def cancer_predict():
+    if not ENABLE_ML:
+        flash('Skin cancer detection is currently disabled to optimize memory usage.')
+        return render_template('predict.html', ml_enabled=False, model_loaded=False,
+                             error="ML features disabled for memory optimization")
+    
     if request.method == 'POST':
         if 'file' not in request.files:
             flash('No file part')
@@ -822,45 +505,28 @@ def cancer_predict():
             return redirect(request.url)
             
         if file and allowed_file(file.filename):
-            # Save the uploaded file
             filename = secure_filename(file.filename)
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
-            # Read and process the image
             img_array = cv2.imread(filepath)
             if img_array is None:
                 flash('Invalid image file')
                 return redirect(request.url)
             
-            # Get model (with improved lazy loading)
-            model = get_skin_cancer_model_fixed()
+            model = load_model_on_demand()
             
             if model is not None:
                 try:
-                    print(f"🔬 Processing image: {filename}")
                     processed_img = preprocess_image_for_cancer_detection(img_array)
+                    pred = model.predict(processed_img, verbose=0)
                     
-                    print("🤖 Making prediction...")
-                    pred = model.predict(processed_img, verbose=0)  # Added verbose=0 to reduce output
-                    
-                    # Enhanced prediction logic with better thresholds
                     raw_probability = float(pred[0][0])
-                    
-                    # You might want to adjust this threshold based on your model's performance
-                    threshold = 0.5  # You mentioned 0.7452, but 0.5 is more common
+                    threshold = 0.5
                     label = 'Cancer' if raw_probability > threshold else 'Not Cancer'
                     confidence = raw_probability if label == 'Cancer' else (1 - raw_probability)
                     
-                    print(f"📊 Prediction Result:")
-                    print(f"   - Label: {label}")
-                    print(f"   - Raw Probability: {raw_probability:.4f}")
-                    print(f"   - Confidence: {confidence:.2%}")
-                    print(f"   - Threshold: {threshold}")
-                    
-                    # Log for monitoring
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    print(f"🕒 Prediction completed at {timestamp}")
                     
                     return render_template('predict.html', 
                                            image_path=filepath, 
@@ -873,38 +539,21 @@ def cancer_predict():
                                            timestamp=timestamp)
                                            
                 except Exception as e:
-                    print(f"💥 Error in skin cancer prediction: {str(e)}")
-                    flash('Error processing image for prediction. Please try again.')
+                    print(f"Prediction error: {str(e)}")
+                    flash('Error processing image. Please try again.')
                     return redirect(request.url)
             else:
-                # Model not available
-                print("⚠️ Model not available for prediction")
-                
-                # Try to load the model one more time
-                print("🔄 Attempting to load model...")
-                load_success = load_skin_cancer_model_fixed()
-                
-                if load_success:
-                    flash('Model loaded successfully! Please try uploading your image again.')
-                else:
-                    flash('Skin cancer detection model is currently unavailable. Please try again in a few minutes.')
-                
+                flash('Model temporarily unavailable due to memory constraints.')
                 return render_template('predict.html', 
-                                       image_path=filepath,
-                                       ml_enabled=ML_ENABLED,
-                                       model_loaded=ML_ENABLED,
-                                       error="Model is being loaded. Please refresh and try again.")
+                                       ml_enabled=ENABLE_ML,
+                                       model_loaded=False,
+                                       error="Model unavailable - memory optimization active")
     
-    return render_template('predict.html', 
-                          ml_enabled=ML_ENABLED, 
-                          model_loaded=ML_ENABLED)
+    return render_template('predict.html', ml_enabled=ENABLE_ML, model_loaded=False)
 
-# API endpoint for getting personalized recommendations
 @app.route('/api/recommendations', methods=['POST'])
 def api_recommendations():
-    """
-    API endpoint for getting AI-powered skincare recommendations
-    """
+    """API endpoint for getting skincare recommendations"""
     try:
         data = request.get_json()
         city = data.get('city')
@@ -914,11 +563,9 @@ def api_recommendations():
         if not city:
             return jsonify({'error': 'City is required'}), 400
             
-        print(f"API request for city: {city}, skin_type: {skin_type}")
-            
         weather_data = get_enhanced_weather_data(city)
         if not weather_data:
-            return jsonify({'error': 'Weather data not available for this city'}), 404
+            return jsonify({'error': 'Weather data not available'}), 404
             
         recommendations = get_ai_weather_recommendations(
             weather_data, 
@@ -938,226 +585,61 @@ def api_recommendations():
             'timestamp': datetime.now().isoformat()
         }
         
-        print(f"API response generated successfully")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"API error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-# Enhanced debugging and status routes
-@app.route('/model-status')
-def model_status():
-    """
-    Enhanced model status endpoint
-    """
-    status = {
-        'ml_enabled': ML_ENABLED,
-        'model_file_exists': os.path.exists(SKIN_CANCER_MODEL_PATH),
-        'model_file_size': 0,
-        'model_file_size_mb': 0,
-        'google_drive_id': GOOGLE_DRIVE_FILE_ID,
-        'google_drive_configured': bool(GOOGLE_DRIVE_FILE_ID and GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE'),
-        'model_loaded_in_memory': skin_cancer_model is not None,
-        'timestamp': datetime.now().isoformat()
-    }
-    
-    if status['model_file_exists']:
-        status['model_file_size'] = os.path.getsize(SKIN_CANCER_MODEL_PATH)
-        status['model_file_size_mb'] = round(status['model_file_size'] / (1024*1024), 2)
-        
-        # Validate the file
-        is_valid, validation_msg = validate_model_file()
-        status['model_file_valid'] = is_valid
-        status['validation_message'] = validation_msg
-    
-    return jsonify(status)
-
-@app.route('/download-model', methods=['GET', 'POST'])
-def download_model():
-    """
-    Manually trigger model download with enhanced feedback
-    """
-    try:
-        print("🔄 Manual model download triggered...")
-        
-        # Force download even if file exists
-        if request.method == 'POST' and request.form.get('force') == 'true':
-            print("🗑️ Force download requested, removing existing file...")
-            if os.path.exists(SKIN_CANCER_MODEL_PATH):
-                os.remove(SKIN_CANCER_MODEL_PATH)
-        
-        success = load_skin_cancer_model_fixed()
-        
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': 'Model downloaded and loaded successfully',
-                'ml_enabled': ML_ENABLED,
-                'model_file_size_mb': round(os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024*1024), 2) if os.path.exists(SKIN_CANCER_MODEL_PATH) else 0,
-                'timestamp': datetime.now().isoformat()
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to download or load model',
-                'ml_enabled': ML_ENABLED,
-                'suggestions': [
-                    'Check your internet connection',
-                    'Verify the Google Drive file ID is correct',
-                    'Ensure the Google Drive file is publicly accessible',
-                    'Try the force download option'
-                ],
-                'timestamp': datetime.now().isoformat()
-            }), 500
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Error during model download: {str(e)}',
-            'ml_enabled': ML_ENABLED,
-            'timestamp': datetime.now().isoformat()
-        }), 500
-
-@app.route('/test-model')
-def test_model():
-    """
-    Test the loaded model with a dummy prediction
-    """
-    model = get_skin_cancer_model_fixed()
-    
-    if model is None:
-        return jsonify({
-            'status': 'error',
-            'message': 'Model not available',
-            'ml_enabled': ML_ENABLED
-        }), 404
-    
-    try:
-        # Create a dummy image for testing
-        dummy_image = np.random.rand(1, 224, 224, 3).astype(np.float32)
-        
-        print("🧪 Running test prediction...")
-        prediction = model.predict(dummy_image, verbose=0)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Model test completed successfully',
-            'test_prediction': float(prediction[0][0]),
-            'model_info': {
-                'input_shape': str(model.input_shape),
-                'output_shape': str(model.output_shape),
-                'total_params': int(model.count_params())
-            },
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Model test failed: {str(e)}',
-            'timestamp': datetime.now().isoformat()
-        }), 500
 
 @app.route('/health')
 def health_check():
-    """
-    Enhanced health check endpoint
-    """
-    # Test model if it's supposed to be loaded
-    model_healthy = False
-    model_error = None
-    
-    if ML_ENABLED and skin_cancer_model is not None:
-        try:
-            # Quick test prediction
-            dummy_input = np.random.rand(1, 224, 224, 3).astype(np.float32)
-            test_pred = skin_cancer_model.predict(dummy_input, verbose=0)
-            model_healthy = True
-        except Exception as e:
-            model_error = str(e)
-    
+    """Health check endpoint"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
+        'memory_usage_mb': check_memory_usage(),
+        'memory_limit_mb': MEMORY_LIMIT_MB,
+        'ml_enabled': ENABLE_ML,
         'services': {
-            'web_app': {
-                'healthy': True,
-                'port': int(os.environ.get('PORT', 5000))
-            },
-            'weather_api': {
-                'healthy': bool(OPENWEATHER_API_KEY),
-                'configured': bool(OPENWEATHER_API_KEY)
-            },
+            'web_app': {'healthy': True},
+            'weather_api': {'healthy': bool(OPENWEATHER_API_KEY)},
             'ml_model': {
-                'enabled': ML_ENABLED,
-                'healthy': model_healthy,
+                'enabled': ENABLE_ML,
                 'loaded': skin_cancer_model is not None,
-                'file_exists': os.path.exists(SKIN_CANCER_MODEL_PATH),
-                'error': model_error
-            },
-            'google_drive': {
-                'configured': bool(GOOGLE_DRIVE_FILE_ID and GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE'),
-                'file_id': GOOGLE_DRIVE_FILE_ID if GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE' else None
+                'memory_optimized': True
             }
         }
     })
 
-# Clear session route
 @app.route('/clear-session')
 def clear_session():
-    """
-    Clear user session data
-    """
     session.clear()
-    flash('Session data cleared successfully')
+    flash('Session cleared')
     return redirect(url_for('index'))
 
-# Before request handler to create session ID for new users
 @app.before_request
 def before_request():
     if 'user_id' not in session:
         session['user_id'] = secrets.token_hex(8)
-        print(f"New user session created: {session['user_id']}")
 
-# Enhanced context processor to make certain variables available in all templates
 @app.context_processor
 def inject_user_info():
     return {
         'user_skin_type': session.get('skin_type'),
         'user_concerns': session.get('skin_concerns', []),
-        'ml_enabled': ML_ENABLED,
+        'ml_enabled': ENABLE_ML,
         'ollama_enabled': OLLAMA_ENABLED,
         'now': datetime.now(),
         'datetime': datetime
     }
 
 if __name__ == '__main__':
-    # Get port from environment variable (Render sets this automatically)
     port = int(os.environ.get('PORT', 5000))
     
-    print("\n" + "="*60)
-    print("🚀 STARTING SKINSENSE APPLICATION")
-    print("="*60)
-    print(f"📊 Configuration Summary:")
-    print(f"   - OpenWeather API: {'✅ Configured' if OPENWEATHER_API_KEY else '❌ Missing'}")
-    print(f"   - Google Drive Model: {'✅ Configured' if GOOGLE_DRIVE_FILE_ID and GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE' else '❌ Not configured'}")
-    print(f"   - Ollama: {'✅ Enabled' if OLLAMA_ENABLED else '❌ Disabled'}")
-    print(f"   - ML Model: {'✅ Loaded' if ML_ENABLED else '❌ Not available'}")
-    print(f"   - Port: {port}")
-    print(f"   - Environment: {'🔧 Development' if os.environ.get('FLASK_ENV') == 'development' else '🚀 Production'}")
-    print("="*60)
+    print("\nSkinSense Application Starting...")
+    print(f"Memory usage: {check_memory_usage():.1f}MB")
+    print(f"ML enabled: {ENABLE_ML}")
+    print(f"Port: {port}")
     
-    # For production (like Render), don't use debug mode
     debug_mode = os.environ.get('FLASK_ENV') == 'development'
-    
-    if debug_mode:
-        print("🔧 Running in DEBUG mode")
-    else:
-        print("🚀 Running in PRODUCTION mode")
-        
-    print("="*60)
-    print("✅ Application ready! Waiting for requests...")
-    print("="*60 + "\n")
-    
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
 
