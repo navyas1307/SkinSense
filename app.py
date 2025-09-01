@@ -35,6 +35,9 @@ OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '2f021261bac8c9f5f35de84b
 SKIN_CANCER_MODEL_PATH = 'skin_cancer_model.h5'
 SKIN_CANCER_IMG_SIZE = (224, 224)
 
+# Your specific Google Drive file ID
+GOOGLE_DRIVE_FILE_ID = os.getenv('GOOGLE_DRIVE_FILE_ID', '1Mt2Xvx--d04qxP-rrrfZcjAsj8RN_IPN')
+
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -42,6 +45,10 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Disable Ollama for production deployment
 OLLAMA_ENABLED = False
 print("Ollama disabled for production deployment")
+
+# Initialize ML variables
+skin_cancer_model = None
+ML_ENABLED = False
 
 # Template filter for datetime formatting
 @app.template_filter('datetime')
@@ -142,6 +149,110 @@ SKIN_CONDITIONS = {
         'image': 'static/images/conditions/eczema.jpg'
     }
 }
+
+def download_model_from_gdrive():
+    """
+    Download your skin cancer model from Google Drive with retry logic
+    """
+    max_attempts = 3
+    
+    for attempt in range(max_attempts):
+        try:
+            print(f"🔄 Attempt {attempt + 1}/{max_attempts}: Downloading skin cancer model from Google Drive...")
+            
+            # Your specific download URL
+            download_url = f"https://drive.google.com/uc?id={GOOGLE_DRIVE_FILE_ID}"
+            
+            # Download with gdown (shows progress bar)
+            success = gdown.download(download_url, SKIN_CANCER_MODEL_PATH, quiet=False)
+            
+            if success and os.path.exists(SKIN_CANCER_MODEL_PATH):
+                file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH)
+                print(f"✅ Model downloaded successfully! Size: {file_size / (1024*1024):.1f} MB")
+                
+                # Verify it's a valid model file
+                try:
+                    test_model = load_model(SKIN_CANCER_MODEL_PATH)
+                    print(f"✅ Model file is valid and loadable!")
+                    return True
+                except Exception as e:
+                    print(f"❌ Downloaded file is not a valid model: {str(e)}")
+                    # Delete the invalid file
+                    if os.path.exists(SKIN_CANCER_MODEL_PATH):
+                        os.remove(SKIN_CANCER_MODEL_PATH)
+                    return False
+            else:
+                print(f"❌ Download failed on attempt {attempt + 1}")
+                
+        except Exception as e:
+            print(f"❌ Error on attempt {attempt + 1}: {str(e)}")
+            
+        # Wait before retry (except on last attempt)
+        if attempt < max_attempts - 1:
+            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+            print(f"⏳ Waiting {wait_time} seconds before retry...")
+            time.sleep(wait_time)
+    
+    print("❌ Failed to download model after all attempts")
+    return False
+
+def load_skin_cancer_model():
+    """
+    Load skin cancer model with automatic download if needed
+    """
+    global skin_cancer_model, ML_ENABLED
+    
+    try:
+        # Check if model exists locally first
+        if os.path.exists(SKIN_CANCER_MODEL_PATH):
+            print("📁 Found local model file, loading...")
+            try:
+                skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
+                ML_ENABLED = True
+                print("✅ Local model loaded successfully!")
+                return True
+            except Exception as e:
+                print(f"❌ Local model file is corrupted: {str(e)}")
+                print("🗑️ Deleting corrupted file and re-downloading...")
+                os.remove(SKIN_CANCER_MODEL_PATH)
+        
+        # Download model from your Google Drive
+        print("📥 Downloading skin cancer model from Google Drive...")
+        if download_model_from_gdrive():
+            # Load the downloaded model
+            print("🔄 Loading downloaded model...")
+            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
+            ML_ENABLED = True
+            print("✅ Downloaded model loaded successfully!")
+            
+            # Print model summary for verification
+            print("📊 Model Summary:")
+            print(f"   - Input shape: {skin_cancer_model.input_shape}")
+            print(f"   - Output shape: {skin_cancer_model.output_shape}")
+            print(f"   - Total params: {skin_cancer_model.count_params()}")
+            
+            return True
+        else:
+            print("❌ Failed to download model from Google Drive")
+            ML_ENABLED = False
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error loading skin cancer model: {str(e)}")
+        ML_ENABLED = False
+        return False
+
+def get_skin_cancer_model():
+    """
+    Get the skin cancer model, with lazy loading if needed
+    """
+    global skin_cancer_model, ML_ENABLED
+    
+    if not ML_ENABLED:
+        print("🔄 Model not loaded, attempting to load...")
+        load_skin_cancer_model()
+    
+    return skin_cancer_model if ML_ENABLED else None
 
 def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_concerns=None):
     """
@@ -378,14 +489,26 @@ def preprocess_image_for_cancer_detection(img):
     img = img / 255.0
     return img
 
+# Initialize model when the app starts
+print("🚀 Initializing Skin Cancer Detection Model...")
+print("=" * 60)
+print(f"📋 Model file: {SKIN_CANCER_MODEL_PATH}")
+print(f"🔗 Google Drive ID: {GOOGLE_DRIVE_FILE_ID}")
+print("=" * 60)
+
 try:
-    # Load skin cancer detection model
-    skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH)
-    ML_ENABLED = True
-    print("Skin cancer model loaded successfully")
-except:
+    load_skin_cancer_model()
+    if ML_ENABLED:
+        print("🎉 Skin Cancer Detection is READY!")
+        print("✅ Users can now upload images for cancer screening")
+    else:
+        print("⚠️  Skin Cancer Detection is UNAVAILABLE") 
+        print("❌ Cancer prediction feature will be disabled")
+except Exception as e:
+    print(f"💥 Failed to initialize model: {str(e)}")
     ML_ENABLED = False
-    print("Skin cancer model not found, ML features disabled")
+
+print("=" * 60)
 
 # Routes
 @app.route('/')
@@ -558,31 +681,56 @@ def cancer_predict():
                 flash('Invalid image file')
                 return redirect(request.url)
             
-            # Predict using skin cancer model
-            if ML_ENABLED:
+            # Get model (with lazy loading if needed)
+            model = get_skin_cancer_model()
+            
+            if model is not None:
                 try:
+                    print(f"🔬 Processing image: {filename}")
                     processed_img = preprocess_image_for_cancer_detection(img_array)
-                    pred = skin_cancer_model.predict(processed_img)
+                    
+                    print("🤖 Making prediction...")
+                    pred = model.predict(processed_img)
                     
                     label = 'Cancer' if pred[0][0] > 0.7452 else 'Not Cancer'
                     probability = float(pred[0][0])
+                    confidence = probability if label == 'Cancer' else (1 - probability)
                     
-                    print(f"Skin cancer prediction: {label} (probability: {probability:.4f})")
+                    print(f"📊 Prediction Result:")
+                    print(f"   - Label: {label}")
+                    print(f"   - Raw Probability: {probability:.4f}")
+                    print(f"   - Confidence: {confidence:.2%}")
+                    
+                    # Log for monitoring
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    print(f"🕒 Prediction completed at {timestamp}")
                     
                     return render_template('predict.html', 
                                            image_path=filepath, 
                                            label=label, 
                                            probability=probability,
-                                           ml_enabled=ML_ENABLED)
+                                           confidence=confidence,
+                                           ml_enabled=True,
+                                           model_loaded=True,
+                                           timestamp=timestamp)
+                                           
                 except Exception as e:
-                    print(f"Error in skin cancer prediction: {str(e)}")
-                    flash('Error processing image for prediction')
+                    print(f"💥 Error in skin cancer prediction: {str(e)}")
+                    flash('Error processing image for prediction. Please try again.')
                     return redirect(request.url)
             else:
-                flash('Skin cancer detection model is not available')
-                return redirect(request.url)
+                # Model not available
+                print("⚠️ Model not available for prediction")
+                flash('Skin cancer detection model is currently unavailable. Please try again in a few minutes.')
+                return render_template('predict.html', 
+                                       image_path=filepath,
+                                       ml_enabled=False,
+                                       model_loaded=False,
+                                       error="Model is being loaded. Please refresh and try again.")
     
-    return render_template('predict.html', ml_enabled=ML_ENABLED)
+    return render_template('predict.html', 
+                          ml_enabled=ML_ENABLED, 
+                          model_loaded=ML_ENABLED)
 
 # API endpoint for getting personalized recommendations
 @app.route('/api/recommendations', methods=['POST'])
@@ -630,6 +778,26 @@ def api_recommendations():
         print(f"API error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# Add a route to check model status
+@app.route('/model-status')
+def model_status():
+    """
+    Check the current status of the ML model
+    """
+    status = {
+        'ml_enabled': ML_ENABLED,
+        'model_file_exists': os.path.exists(SKIN_CANCER_MODEL_PATH),
+        'model_file_size': 0,
+        'google_drive_id': GOOGLE_DRIVE_FILE_ID,
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    if status['model_file_exists']:
+        status['model_file_size'] = os.path.getsize(SKIN_CANCER_MODEL_PATH)
+        status['model_file_size_mb'] = round(status['model_file_size'] / (1024*1024), 2)
+    
+    return jsonify(status)
+
 # Health check endpoint
 @app.route('/health')
 def health_check():
@@ -640,6 +808,8 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'ml_enabled': ML_ENABLED,
+        'model_loaded': ML_ENABLED,
+        'google_drive_configured': bool(GOOGLE_DRIVE_FILE_ID and GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE'),
         'ai_services': {
             'ollama': {
                 'enabled': OLLAMA_ENABLED,
@@ -657,6 +827,37 @@ def clear_session():
     session.clear()
     flash('Session data cleared successfully')
     return redirect(url_for('index'))
+
+# Route to manually trigger model download (for debugging)
+@app.route('/download-model')
+def download_model():
+    """
+    Manually trigger model download (for admin/debugging purposes)
+    """
+    try:
+        print("🔄 Manual model download triggered...")
+        success = load_skin_cancer_model()
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': 'Model downloaded and loaded successfully',
+                'ml_enabled': ML_ENABLED,
+                'timestamp': datetime.now().isoformat()
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to download or load model',
+                'ml_enabled': ML_ENABLED,
+                'timestamp': datetime.now().isoformat()
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Error during model download: {str(e)}',
+            'ml_enabled': ML_ENABLED,
+            'timestamp': datetime.now().isoformat()
+        }), 500
 
 # Before request handler to create session ID for new users
 @app.before_request
@@ -681,15 +882,29 @@ if __name__ == '__main__':
     # Get port from environment variable (Render sets this automatically)
     port = int(os.environ.get('PORT', 5000))
     
-    print("Starting SkinSense Application...")
-    print(f"OpenWeather API: {'Configured' if OPENWEATHER_API_KEY else 'Missing'}")
-    print(f"Ollama: {'Enabled' if OLLAMA_ENABLED else 'Disabled'}")
-    print(f"ML Model: {'Loaded' if ML_ENABLED else 'Not available'}")
-    print(f"Port: {port}")
-    print("=" * 50)
+    print("\n" + "="*60)
+    print("🚀 STARTING SKINSENSE APPLICATION")
+    print("="*60)
+    print(f"📊 Configuration Summary:")
+    print(f"   - OpenWeather API: {'✅ Configured' if OPENWEATHER_API_KEY else '❌ Missing'}")
+    print(f"   - Google Drive Model: {'✅ Configured' if GOOGLE_DRIVE_FILE_ID and GOOGLE_DRIVE_FILE_ID != 'YOUR_ACTUAL_FILE_ID_HERE' else '❌ Not configured'}")
+    print(f"   - Ollama: {'✅ Enabled' if OLLAMA_ENABLED else '❌ Disabled'}")
+    print(f"   - ML Model: {'✅ Loaded' if ML_ENABLED else '❌ Not available'}")
+    print(f"   - Port: {port}")
+    print(f"   - Environment: {'🔧 Development' if os.environ.get('FLASK_ENV') == 'development' else '🚀 Production'}")
+    print("="*60)
     
     # For production (like Render), don't use debug mode
     debug_mode = os.environ.get('FLASK_ENV') == 'development'
+    
+    if debug_mode:
+        print("🔧 Running in DEBUG mode")
+    else:
+        print("🚀 Running in PRODUCTION mode")
+        
+    print("="*60)
+    print("✅ Application ready! Waiting for requests...")
+    print("="*60 + "\n")
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
 
