@@ -12,6 +12,7 @@ import time
 from dotenv import load_dotenv
 import re
 import traceback
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -26,8 +27,8 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 # API Keys
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY', '2f021261bac8c9f5f35de84b6486589e')
 
-# Model Configuration - DISABLE FOR MEMORY OPTIMIZATION
-SKIN_CANCER_MODEL_PATH = 'skin_cancer_model.h5'
+# Model Configuration
+SKIN_CANCER_MODEL_PATH = os.getenv('SKIN_CANCER_MODEL_PATH', 'skin_cancer_model.h5')
 SKIN_CANCER_IMG_SIZE = (224, 224)
 GOOGLE_DRIVE_FILE_ID = os.getenv('GOOGLE_DRIVE_FILE_ID', '1Mt2Xvx--d04qxP-rrrfZcjAsj8RN_IPN')
 
@@ -35,13 +36,17 @@ GOOGLE_DRIVE_FILE_ID = os.getenv('GOOGLE_DRIVE_FILE_ID', '1Mt2Xvx--d04qxP-rrrfZc
 tensorflow_available = False
 skin_cancer_model = None
 ML_ENABLED = False
+ML_ERROR_MESSAGE = None
 
-# Check memory constraints - disable ML on low memory environments
+# Check memory constraints
 MEMORY_LIMIT_MB = int(os.environ.get('MEMORY_LIMIT_MB', '512'))
 ENABLE_ML = os.environ.get('ENABLE_ML', 'false').lower() == 'true'
 
-print(f"Memory limit: {MEMORY_LIMIT_MB}MB")
-print(f"ML explicitly enabled: {ENABLE_ML}")
+print(f"🔧 Configuration:")
+print(f"   Memory limit: {MEMORY_LIMIT_MB}MB")
+print(f"   ML explicitly enabled: {ENABLE_ML}")
+print(f"   Model path: {SKIN_CANCER_MODEL_PATH}")
+print(f"   Google Drive ID: {GOOGLE_DRIVE_FILE_ID}")
 
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -58,13 +63,100 @@ def check_memory_usage():
         memory_mb = process.memory_info().rss / 1024 / 1024
         return memory_mb
     except ImportError:
+        print("⚠️  psutil not available - install with: pip install psutil")
         return 0
+
+def diagnose_ml_setup():
+    """Comprehensive ML setup diagnosis"""
+    print("\n🩺 DIAGNOSING ML SETUP...")
+    print("-" * 50)
+    
+    issues = []
+    
+    # Check 1: Environment Variables
+    print("1. 🔍 Environment Variables:")
+    if not ENABLE_ML:
+        issues.append("ENABLE_ML is set to False")
+        print(f"   ❌ ENABLE_ML: {os.environ.get('ENABLE_ML', 'not set')} (should be 'true')")
+    else:
+        print(f"   ✅ ENABLE_ML: {ENABLE_ML}")
+    
+    # Check 2: Model File
+    print("2. 📁 Model File:")
+    if os.path.exists(SKIN_CANCER_MODEL_PATH):
+        file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024*1024)
+        print(f"   ✅ Model file exists: {SKIN_CANCER_MODEL_PATH} ({file_size:.1f} MB)")
+    else:
+        issues.append(f"Model file not found at {SKIN_CANCER_MODEL_PATH}")
+        print(f"   ❌ Model file not found: {SKIN_CANCER_MODEL_PATH}")
+        print(f"   💡 Download from: https://drive.google.com/file/d/{GOOGLE_DRIVE_FILE_ID}/view")
+    
+    # Check 3: TensorFlow
+    print("3. 🤖 TensorFlow:")
+    try:
+        import tensorflow as tf
+        print(f"   ✅ TensorFlow available: {tf.__version__}")
+        
+        # Check GPU
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            print(f"   🎮 GPU available: {len(gpus)} device(s)")
+        else:
+            print("   💻 Running on CPU")
+            
+    except ImportError as e:
+        issues.append("TensorFlow not installed")
+        print(f"   ❌ TensorFlow not available: {e}")
+        print(f"   💡 Install with: pip install tensorflow")
+    
+    # Check 4: Keras
+    print("4. 🧠 Keras:")
+    try:
+        from keras.models import load_model
+        print("   ✅ Keras available")
+    except ImportError:
+        try:
+            from tensorflow.keras.models import load_model
+            print("   ✅ Keras available via TensorFlow")
+        except ImportError as e:
+            issues.append("Keras not available")
+            print(f"   ❌ Keras not available: {e}")
+    
+    # Check 5: Memory
+    print("5. 💾 Memory:")
+    current_memory = check_memory_usage()
+    if current_memory > 0:
+        memory_percent = (current_memory / MEMORY_LIMIT_MB) * 100
+        print(f"   📊 Current usage: {current_memory:.1f}MB ({memory_percent:.1f}% of {MEMORY_LIMIT_MB}MB limit)")
+        if current_memory > MEMORY_LIMIT_MB * 0.8:
+            issues.append("High memory usage")
+            print("   ⚠️  High memory usage - may prevent model loading")
+        else:
+            print("   ✅ Memory usage acceptable")
+    else:
+        print("   ⚠️  Cannot check memory (psutil not available)")
+    
+    # Summary
+    if issues:
+        print(f"\n❌ ISSUES FOUND ({len(issues)}):")
+        for i, issue in enumerate(issues, 1):
+            print(f"   {i}. {issue}")
+        print(f"\n💡 QUICK FIXES:")
+        print(f"   export ENABLE_ML=true")
+        print(f"   pip install tensorflow keras pillow opencv-python psutil")
+        print(f"   # Download model from Google Drive to {SKIN_CANCER_MODEL_PATH}")
+    else:
+        print(f"\n✅ All checks passed! ML should be working.")
+    
+    return len(issues) == 0
 
 def lazy_import_tensorflow():
     """Lazy import TensorFlow to save memory"""
-    global tensorflow_available
+    global tensorflow_available, ML_ERROR_MESSAGE
+    
     if not tensorflow_available:
         try:
+            print("📦 Loading TensorFlow...")
             import tensorflow as tf
             from keras.models import load_model
             
@@ -77,13 +169,93 @@ def lazy_import_tensorflow():
             if gpus:
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
+                print(f"🎮 Configured {len(gpus)} GPU(s) for memory growth")
             
             tensorflow_available = True
+            print("✅ TensorFlow loaded successfully")
             return True
+            
         except ImportError as e:
-            print(f"TensorFlow not available: {e}")
+            ML_ERROR_MESSAGE = f"TensorFlow not available: {e}"
+            print(f"❌ {ML_ERROR_MESSAGE}")
+            print("💡 Install with: pip install tensorflow")
             return False
+        except Exception as e:
+            ML_ERROR_MESSAGE = f"TensorFlow error: {e}"
+            print(f"❌ {ML_ERROR_MESSAGE}")
+            return False
+    
     return True
+
+def load_model_on_demand():
+    """Load model only when needed to save memory"""
+    global skin_cancer_model, ML_ENABLED, ML_ERROR_MESSAGE
+    
+    print(f"🔄 Attempting to load ML model...")
+    
+    # Check if ML is enabled
+    if not ENABLE_ML:
+        ML_ERROR_MESSAGE = "ML disabled by environment variable ENABLE_ML=false"
+        print(f"❌ {ML_ERROR_MESSAGE}")
+        print("💡 Fix: Set environment variable ENABLE_ML=true")
+        return None
+    
+    # Check memory constraints
+    current_memory = check_memory_usage()
+    memory_threshold = MEMORY_LIMIT_MB * 0.8  # 80% of limit
+    
+    if current_memory > memory_threshold:
+        ML_ERROR_MESSAGE = f"Memory usage too high ({current_memory:.1f}MB > {memory_threshold:.1f}MB threshold)"
+        print(f"❌ {ML_ERROR_MESSAGE}")
+        return None
+    
+    # Check if model file exists
+    if not os.path.exists(SKIN_CANCER_MODEL_PATH):
+        ML_ERROR_MESSAGE = f"Model file not found: {SKIN_CANCER_MODEL_PATH}"
+        print(f"❌ {ML_ERROR_MESSAGE}")
+        print(f"💡 Download from: https://drive.google.com/file/d/{GOOGLE_DRIVE_FILE_ID}/view")
+        return None
+    
+    # Import TensorFlow
+    if not lazy_import_tensorflow():
+        return None
+    
+    # Load model if not already loaded
+    if skin_cancer_model is None:
+        try:
+            from keras.models import load_model
+            
+            print(f"📂 Loading model from: {SKIN_CANCER_MODEL_PATH}")
+            file_size = os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024*1024)
+            print(f"📏 Model file size: {file_size:.1f} MB")
+            
+            # Load model
+            skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
+            
+            # Compile model
+            skin_cancer_model.compile(
+                optimizer='adam',
+                loss='binary_crossentropy',
+                metrics=['accuracy']
+            )
+            
+            ML_ENABLED = True
+            new_memory = check_memory_usage()
+            memory_increase = new_memory - current_memory
+            
+            print(f"✅ Model loaded successfully!")
+            print(f"📊 Memory usage: {current_memory:.1f}MB → {new_memory:.1f}MB (+{memory_increase:.1f}MB)")
+            print(f"🔍 Model input shape: {skin_cancer_model.input_shape}")
+            print(f"🎯 Model output shape: {skin_cancer_model.output_shape}")
+            
+        except Exception as e:
+            ML_ERROR_MESSAGE = f"Failed to load model: {str(e)}"
+            print(f"❌ {ML_ERROR_MESSAGE}")
+            print("📋 Full error traceback:")
+            traceback.print_exc()
+            return None
+    
+    return skin_cancer_model
 
 # Template filter for datetime formatting
 @app.template_filter('datetime')
@@ -184,47 +356,6 @@ SKIN_CONDITIONS = {
         'image': 'static/images/conditions/eczema.jpg'
     }
 }
-
-def load_model_on_demand():
-    """Load model only when needed to save memory"""
-    global skin_cancer_model, ML_ENABLED
-    
-    if not ENABLE_ML:
-        print("ML disabled by environment variable")
-        return None
-        
-    current_memory = check_memory_usage()
-    if current_memory > MEMORY_LIMIT_MB * 0.8:  # 80% of limit
-        print(f"Memory usage too high ({current_memory:.1f}MB), skipping ML model")
-        return None
-    
-    if not lazy_import_tensorflow():
-        return None
-        
-    if skin_cancer_model is None:
-        try:
-            import tensorflow as tf
-            from keras.models import load_model
-            
-            if os.path.exists(SKIN_CANCER_MODEL_PATH):
-                print("Loading model on demand...")
-                skin_cancer_model = load_model(SKIN_CANCER_MODEL_PATH, compile=False)
-                skin_cancer_model.compile(
-                    optimizer='adam',
-                    loss='binary_crossentropy',
-                    metrics=['accuracy']
-                )
-                ML_ENABLED = True
-                print(f"Model loaded successfully, memory usage: {check_memory_usage():.1f}MB")
-            else:
-                print("Model file not found")
-                return None
-                
-        except Exception as e:
-            print(f"Failed to load model: {e}")
-            return None
-    
-    return skin_cancer_model
 
 def get_intelligent_fallback_recommendations(weather_data, skin_type=None, skin_concerns=None):
     """
@@ -379,15 +510,71 @@ def preprocess_image_for_cancer_detection(img):
     img = img / 255.0
     return img
 
-# Initialize with memory optimization
-print("Initializing SkinSense Application...")
-print(f"Memory optimization enabled - ML features: {'enabled' if ENABLE_ML else 'disabled'}")
-print(f"Current memory usage: {check_memory_usage():.1f}MB")
+# Run diagnostics on startup
+print("\n" + "="*60)
+print("🚀 SKINSENSE APPLICATION STARTUP")
+print("="*60)
+
+# Run ML diagnostics
+ml_status = diagnose_ml_setup()
+print(f"\n📊 ML Status: {'✅ Ready' if ml_status else '❌ Issues Found'}")
+
+current_memory = check_memory_usage()
+print(f"💾 Current memory usage: {current_memory:.1f}MB")
 
 # Routes
 @app.route('/')
 def index():
     return render_template('index.html', ml_enabled=ENABLE_ML, ollama_enabled=OLLAMA_ENABLED)
+
+@app.route('/ml-debug')
+def ml_debug():
+    """ML debugging endpoint"""
+    debug_info = {
+        'timestamp': datetime.now().isoformat(),
+        'configuration': {
+            'ENABLE_ML': ENABLE_ML,
+            'MEMORY_LIMIT_MB': MEMORY_LIMIT_MB,
+            'SKIN_CANCER_MODEL_PATH': SKIN_CANCER_MODEL_PATH,
+            'GOOGLE_DRIVE_FILE_ID': GOOGLE_DRIVE_FILE_ID
+        },
+        'environment': {
+            'model_file_exists': os.path.exists(SKIN_CANCER_MODEL_PATH),
+            'model_file_size_mb': os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024*1024) if os.path.exists(SKIN_CANCER_MODEL_PATH) else 0,
+            'tensorflow_available': tensorflow_available,
+            'ml_enabled': ML_ENABLED,
+            'ml_error': ML_ERROR_MESSAGE,
+            'current_memory_mb': check_memory_usage()
+        },
+        'system': {
+            'python_version': sys.version,
+            'working_directory': os.getcwd(),
+            'environment_variables': {
+                'ENABLE_ML': os.environ.get('ENABLE_ML', 'not set'),
+                'MEMORY_LIMIT_MB': os.environ.get('MEMORY_LIMIT_MB', 'not set'),
+                'SKIN_CANCER_MODEL_PATH': os.environ.get('SKIN_CANCER_MODEL_PATH', 'not set')
+            }
+        },
+        'quick_fixes': [
+            "Set environment variable: ENABLE_ML=true",
+            "Install dependencies: pip install tensorflow keras pillow opencv-python psutil",
+            f"Download model to: {SKIN_CANCER_MODEL_PATH}",
+            f"Download URL: https://drive.google.com/file/d/{GOOGLE_DRIVE_FILE_ID}/view"
+        ]
+    }
+    
+    # Try to get TensorFlow info
+    try:
+        import tensorflow as tf
+        debug_info['tensorflow'] = {
+            'version': tf.__version__,
+            'gpu_available': len(tf.config.list_physical_devices('GPU')) > 0,
+            'gpu_count': len(tf.config.list_physical_devices('GPU'))
+        }
+    except ImportError:
+        debug_info['tensorflow'] = {'error': 'TensorFlow not installed'}
+    
+    return jsonify(debug_info)
 
 @app.route('/weather', methods=['GET', 'POST'])
 def weather_recommendations():
@@ -489,67 +676,189 @@ def condition_detail(condition):
 
 @app.route('/cancer-predict', methods=['GET', 'POST'])
 def cancer_predict():
-    if not ENABLE_ML:
-        flash('Skin cancer detection is currently disabled to optimize memory usage.')
-        return render_template('predict.html', ml_enabled=False, model_loaded=False,
-                             error="ML features disabled for memory optimization")
+    if request.method == 'GET':
+        # Show the upload form with current ML status
+        return render_template('predict.html', 
+                             ml_enabled=ENABLE_ML, 
+                             model_loaded=ML_ENABLED,
+                             error=ML_ERROR_MESSAGE,
+                             model_path=SKIN_CANCER_MODEL_PATH,
+                             google_drive_id=GOOGLE_DRIVE_FILE_ID)
     
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('No file part')
-            return redirect(request.url)
-            
-        file = request.files['file']
-        if file.filename == '':
-            flash('No selected file')
-            return redirect(request.url)
-            
-        if file and allowed_file(file.filename):
+    # POST request - handle file upload and prediction
+    if not ENABLE_ML:
+        flash('Skin cancer detection is disabled. Set ENABLE_ML=true to enable.')
+        return render_template('predict.html', 
+                             ml_enabled=False, 
+                             model_loaded=False,
+                             error="ML features disabled by environment variable",
+                             model_path=SKIN_CANCER_MODEL_PATH,
+                             google_drive_id=GOOGLE_DRIVE_FILE_ID)
+    
+    if 'file' not in request.files:
+        flash('No file part')
+        return redirect(request.url)
+        
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file')
+        return redirect(request.url)
+        
+    if file and allowed_file(file.filename):
+        try:
+            # Save uploaded file
             filename = secure_filename(file.filename)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_{filename}"
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
+            print(f"🖼️  Image saved to: {filepath}")
+            
+            # Load and validate image
             img_array = cv2.imread(filepath)
             if img_array is None:
-                flash('Invalid image file')
+                flash('Invalid image file. Please upload a valid PNG, JPG, or JPEG image.')
                 return redirect(request.url)
             
+            # Try to load model
             model = load_model_on_demand()
             
             if model is not None:
                 try:
+                    print(f"🔬 Processing image for prediction...")
+                    
+                    # Preprocess image
                     processed_img = preprocess_image_for_cancer_detection(img_array)
+                    print(f"📐 Image preprocessed to shape: {processed_img.shape}")
+                    
+                    # Make prediction
+                    print(f"🤖 Running model prediction...")
                     pred = model.predict(processed_img, verbose=0)
                     
+                    # Process prediction results
                     raw_probability = float(pred[0][0])
                     threshold = 0.5
                     label = 'Cancer' if raw_probability > threshold else 'Not Cancer'
                     confidence = raw_probability if label == 'Cancer' else (1 - raw_probability)
                     
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Create detailed prediction info
+                    prediction_info = {
+                        'label': label,
+                        'raw_probability': raw_probability,
+                        'confidence': confidence,
+                        'threshold': threshold,
+                        'confidence_level': 'High' if confidence > 0.8 else 'Medium' if confidence > 0.6 else 'Low',
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'model_info': {
+                            'input_shape': str(model.input_shape),
+                            'output_shape': str(model.output_shape)
+                        }
+                    }
+                    
+                    print(f"✅ Prediction complete:")
+                    print(f"   Label: {label}")
+                    print(f"   Confidence: {confidence:.3f}")
+                    print(f"   Raw probability: {raw_probability:.3f}")
                     
                     return render_template('predict.html', 
-                                           image_path=filepath, 
-                                           label=label, 
-                                           probability=raw_probability,
-                                           confidence=confidence,
-                                           threshold=threshold,
+                                           image_path=filepath.replace('static/', ''), 
+                                           prediction=prediction_info,
                                            ml_enabled=True,
                                            model_loaded=True,
-                                           timestamp=timestamp)
+                                           success=True)
                                            
                 except Exception as e:
-                    print(f"Prediction error: {str(e)}")
-                    flash('Error processing image. Please try again.')
-                    return redirect(request.url)
+                    error_msg = f"Error during prediction: {str(e)}"
+                    print(f"❌ {error_msg}")
+                    print("📋 Full error traceback:")
+                    traceback.print_exc()
+                    
+                    flash(f'Prediction failed: {error_msg}')
+                    return render_template('predict.html', 
+                                           ml_enabled=ENABLE_ML,
+                                           model_loaded=False,
+                                           error=error_msg,
+                                           model_path=SKIN_CANCER_MODEL_PATH,
+                                           google_drive_id=GOOGLE_DRIVE_FILE_ID)
             else:
-                flash('Model temporarily unavailable due to memory constraints.')
+                flash(f'Model unavailable: {ML_ERROR_MESSAGE}')
                 return render_template('predict.html', 
                                        ml_enabled=ENABLE_ML,
                                        model_loaded=False,
-                                       error="Model unavailable - memory optimization active")
+                                       error=ML_ERROR_MESSAGE,
+                                       model_path=SKIN_CANCER_MODEL_PATH,
+                                       google_drive_id=GOOGLE_DRIVE_FILE_ID)
+                                       
+        except Exception as e:
+            error_msg = f"Error processing upload: {str(e)}"
+            print(f"❌ {error_msg}")
+            flash(error_msg)
+            return redirect(request.url)
+    else:
+        flash('Invalid file type. Please upload PNG, JPG, or JPEG images only.')
+        return redirect(request.url)
+
+@app.route('/test-ml')
+def test_ml():
+    """Test ML functionality endpoint"""
+    if not ENABLE_ML:
+        return jsonify({
+            'status': 'disabled',
+            'message': 'ML disabled by environment variable',
+            'fix': 'Set ENABLE_ML=true'
+        })
     
-    return render_template('predict.html', ml_enabled=ENABLE_ML, model_loaded=False)
+    try:
+        model = load_model_on_demand()
+        if model is not None:
+            # Create a dummy test image
+            import numpy as np
+            test_img = np.random.rand(1, 224, 224, 3).astype(np.float32)
+            
+            # Test prediction
+            pred = model.predict(test_img, verbose=0)
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'ML model is working correctly',
+                'test_prediction': float(pred[0][0]),
+                'model_loaded': True,
+                'tensorflow_available': tensorflow_available
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': ML_ERROR_MESSAGE or 'Model failed to load',
+                'model_loaded': False
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'ML test failed: {str(e)}',
+            'traceback': traceback.format_exc()
+        })
+
+@app.route('/download-model')
+def download_model():
+    """Provide model download instructions"""
+    instructions = {
+        'model_path': SKIN_CANCER_MODEL_PATH,
+        'google_drive_id': GOOGLE_DRIVE_FILE_ID,
+        'download_methods': {
+            'manual': f'https://drive.google.com/file/d/{GOOGLE_DRIVE_FILE_ID}/view',
+            'wget': f'wget --no-check-certificate "https://docs.google.com/uc?export=download&id={GOOGLE_DRIVE_FILE_ID}" -O {SKIN_CANCER_MODEL_PATH}',
+            'curl': f'curl -L "https://docs.google.com/uc?export=download&id={GOOGLE_DRIVE_FILE_ID}" -o {SKIN_CANCER_MODEL_PATH}'
+        },
+        'verification': {
+            'check_file': f'ls -la {SKIN_CANCER_MODEL_PATH}',
+            'file_should_exist': os.path.exists(SKIN_CANCER_MODEL_PATH),
+            'current_file_size': os.path.getsize(SKIN_CANCER_MODEL_PATH) / (1024*1024) if os.path.exists(SKIN_CANCER_MODEL_PATH) else 0
+        }
+    }
+    
+    return jsonify(instructions)
 
 @app.route('/api/recommendations', methods=['POST'])
 def api_recommendations():
@@ -593,21 +902,39 @@ def api_recommendations():
 @app.route('/health')
 def health_check():
     """Health check endpoint"""
+    current_memory = check_memory_usage()
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'memory_usage_mb': check_memory_usage(),
+        'memory_usage_mb': current_memory,
         'memory_limit_mb': MEMORY_LIMIT_MB,
-        'ml_enabled': ENABLE_ML,
+        'memory_usage_percent': (current_memory / MEMORY_LIMIT_MB) * 100 if MEMORY_LIMIT_MB > 0 else 0,
+        'ml_configuration': {
+            'enabled': ENABLE_ML,
+            'model_loaded': ML_ENABLED,
+            'model_path': SKIN_CANCER_MODEL_PATH,
+            'model_exists': os.path.exists(SKIN_CANCER_MODEL_PATH),
+            'tensorflow_available': tensorflow_available,
+            'error': ML_ERROR_MESSAGE
+        },
         'services': {
             'web_app': {'healthy': True},
             'weather_api': {'healthy': bool(OPENWEATHER_API_KEY)},
             'ml_model': {
                 'enabled': ENABLE_ML,
-                'loaded': skin_cancer_model is not None,
-                'memory_optimized': True
+                'loaded': ML_ENABLED,
+                'memory_optimized': True,
+                'status': 'ready' if ML_ENABLED else 'not_loaded',
+                'error': ML_ERROR_MESSAGE
             }
-        }
+        },
+        'quick_fixes': [
+            f"Set ENABLE_ML=true (currently: {os.environ.get('ENABLE_ML', 'not set')})",
+            f"Download model to: {SKIN_CANCER_MODEL_PATH}",
+            "Install: pip install tensorflow keras pillow opencv-python psutil",
+            f"Model download: https://drive.google.com/file/d/{GOOGLE_DRIVE_FILE_ID}/view"
+        ] if not ML_ENABLED else []
     })
 
 @app.route('/clear-session')
@@ -627,18 +954,39 @@ def inject_user_info():
         'user_skin_type': session.get('skin_type'),
         'user_concerns': session.get('skin_concerns', []),
         'ml_enabled': ENABLE_ML,
+        'ml_loaded': ML_ENABLED,
+        'ml_error': ML_ERROR_MESSAGE,
         'ollama_enabled': OLLAMA_ENABLED,
         'now': datetime.now(),
         'datetime': datetime
     }
 
+# Error handlers
+@app.errorhandler(404)
+def not_found_error(error):
+    return render_template('404.html'), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return render_template('500.html'), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     
-    print("\nSkinSense Application Starting...")
-    print(f"Memory usage: {check_memory_usage():.1f}MB")
-    print(f"ML enabled: {ENABLE_ML}")
-    print(f"Port: {port}")
+    print(f"\n🚀 SkinSense Application Starting...")
+    print(f"📍 Port: {port}")
+    print(f"💾 Memory usage: {check_memory_usage():.1f}MB / {MEMORY_LIMIT_MB}MB")
+    print(f"🤖 ML enabled: {ENABLE_ML}")
+    print(f"🔬 ML loaded: {ML_ENABLED}")
+    if ML_ERROR_MESSAGE:
+        print(f"⚠️  ML Error: {ML_ERROR_MESSAGE}")
+    
+    print(f"\n🔗 Available endpoints:")
+    print(f"   http://localhost:{port}/ - Main application")
+    print(f"   http://localhost:{port}/health - Health check")
+    print(f"   http://localhost:{port}/ml-debug - ML diagnostics")
+    print(f"   http://localhost:{port}/test-ml - Test ML functionality")
+    print(f"   http://localhost:{port}/download-model - Model download info")
     
     debug_mode = os.environ.get('FLASK_ENV') == 'development'
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
