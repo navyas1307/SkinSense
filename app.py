@@ -14,6 +14,15 @@ import re
 import traceback
 import sys
 
+# Auto-download model on startup if not present
+if ENABLE_ML and not os.path.exists(SKIN_CANCER_MODEL_PATH):
+    print("🚀 Model not found, attempting download...")
+    try:
+        from download_model import download_model
+        download_model()
+    except Exception as e:
+        print(f"⚠️ Could not auto-download model: {e}")
+
 # Load environment variables
 load_dotenv()
 
