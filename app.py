@@ -14,14 +14,6 @@ import re
 import traceback
 import sys
 
-# Auto-download model on startup if not present
-if ENABLE_ML and not os.path.exists(SKIN_CANCER_MODEL_PATH):
-    print("🚀 Model not found, attempting download...")
-    try:
-        from download_model import download_model
-        download_model()
-    except Exception as e:
-        print(f"⚠️ Could not auto-download model: {e}")
 
 # Load environment variables
 load_dotenv()
@@ -56,6 +48,15 @@ print(f"   Memory limit: {MEMORY_LIMIT_MB}MB")
 print(f"   ML explicitly enabled: {ENABLE_ML}")
 print(f"   Model path: {SKIN_CANCER_MODEL_PATH}")
 print(f"   Google Drive ID: {GOOGLE_DRIVE_FILE_ID}")
+
+# Auto-download model on startup if not present
+if ENABLE_ML and not os.path.exists(SKIN_CANCER_MODEL_PATH):
+    print("🚀 Model not found, attempting download...")
+    try:
+        from download_model import download_model
+        download_model()
+    except Exception as e:
+        print(f"⚠️ Could not auto-download model: {e}")
 
 # Create upload directory if it doesn't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
