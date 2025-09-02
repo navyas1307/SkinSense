@@ -24,7 +24,7 @@ mdurl==0.1.2
 ml-dtypes
 namex==0.1.0
 numpy
-opencv-python
+opencv-python-headless
 opt_einsum==3.4.0
 optree==0.17.0
 packaging==25.0
@@ -55,4 +55,5 @@ gunicorn==23.0.0
 python-dotenv==1.0.1
 langchain-community
 gdown==4.7.1
+
 
